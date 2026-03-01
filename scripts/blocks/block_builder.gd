@@ -8,6 +8,10 @@ class_name BlockBuilder
 ## Build a Node3D subtree from a Block definition and attach to parent.
 ## Returns the root Node3D.
 static func build(block: Block, parent: Node3D) -> Node3D:
+	# Skip subdivided parents — they've been replaced by child blocks
+	if not block.child_lod_ids.is_empty() and not block.active:
+		return null
+
 	var root := Node3D.new()
 	root.name = block.block_name if not block.block_name.is_empty() else block.block_id
 	root.position = block.position
@@ -89,6 +93,11 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 			cap.radius = dims.x
 			cap.height = dims.y
 			mi.mesh = cap
+		BlockCategories.SHAPE_SPHERE:
+			var sphere := SphereMesh.new()
+			sphere.radius = dims.x
+			sphere.height = dims.y
+			mi.mesh = sphere
 
 	# Position mesh at collision offset (visual matches collision)
 	mi.position = block.collision_offset
@@ -138,6 +147,12 @@ static func _make_shape(block: Block) -> Shape3D:
 			cap.radius = block.collision_size.x
 			cap.height = block.collision_size.y
 			return cap
+		BlockCategories.SHAPE_SPHERE:
+			# Godot 4 has no SphereShape3D — use CylinderShape3D as bounding approx
+			var sph := CylinderShape3D.new()
+			sph.radius = block.collision_size.x
+			sph.height = block.collision_size.y
+			return sph
 	# Fallback
 	var fallback := BoxShape3D.new()
 	fallback.size = Vector3.ONE

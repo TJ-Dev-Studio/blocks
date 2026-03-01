@@ -10,6 +10,8 @@ signal block_added(block: Block)
 signal block_removed(block: Block)
 signal block_updated(block: Block)
 signal message_received(target_block: Block, msg_type: String, data: Dictionary, sender_id: String)
+signal block_subdivided(parent_block: Block, children: Array[Block])
+signal blocks_merged(source_blocks: Array[Block], result_block: Block)
 
 # --- Storage ---
 
@@ -401,6 +403,174 @@ func export_collision_boxes() -> Array[Dictionary]:
 		if not dict.is_empty():
 			boxes.append(dict)
 	return boxes
+
+
+# =========================================================================
+# Cellular Operations (Subdivide / Merge / LOD)
+# =========================================================================
+
+## Subdivide a block into children. Deactivates parent, registers children,
+## transfers external connections to children, auto-connects siblings.
+## Returns the child blocks, or empty array on failure.
+func subdivide_block(block_id: String, axis: int = -1) -> Array[Block]:
+	var block := get_block(block_id)
+	if block == null:
+		return []
+
+	if not block.can_subdivide(axis):
+		return []
+
+	var children := block.subdivide(axis)
+	if children.is_empty():
+		return []
+
+	# Deactivate parent
+	block.active = false
+
+	# Register each child
+	for child in children:
+		if not register(child):
+			push_warning("[BlockRegistry] Failed to register subdivision child '%s'" % child.block_id)
+			continue
+
+	# Transfer parent's external connections to all children
+	for conn_id in block.connections:
+		if conn_id == block_id:
+			continue
+		var peer := get_block(conn_id)
+		if peer == null:
+			continue
+		# Remove old connection to parent
+		peer.remove_connection(block_id)
+		# Connect peer to first child as representative
+		if not children.is_empty():
+			peer.add_connection(children[0].block_id)
+			children[0].add_connection(conn_id)
+
+	# Auto-connect siblings as a mesh
+	for i in range(children.size()):
+		for j in range(i + 1, children.size()):
+			children[i].add_connection(children[j].block_id)
+			children[j].add_connection(children[i].block_id)
+
+	block_subdivided.emit(block, children)
+	return children
+
+
+## Merge two or more blocks into one. Unregisters sources, registers result,
+## unions connections. Returns the merged block, or null on failure.
+func merge_blocks(block_ids: Array[String]) -> Block:
+	if block_ids.size() < 2:
+		return null
+
+	var blocks: Array[Block] = []
+	for bid in block_ids:
+		var b := get_block(bid)
+		if b == null:
+			return null
+		blocks.append(b)
+
+	# Start with first block, merge successively
+	var result: Block = blocks[0]
+	for i in range(1, blocks.size()):
+		result = result.merge_with(blocks[i])
+		if result == null:
+			return null
+
+	# Collect all external connections (excluding source block IDs)
+	var source_set := {}
+	for bid in block_ids:
+		source_set[bid] = true
+
+	var external_conns: PackedStringArray = PackedStringArray()
+	for b in blocks:
+		for conn_id in b.connections:
+			if not source_set.has(conn_id) and conn_id not in external_conns:
+				external_conns.append(conn_id)
+
+	# Unregister source blocks
+	for bid in block_ids:
+		unregister(bid)
+
+	# Register result
+	if not register(result):
+		push_warning("[BlockRegistry] Failed to register merged block '%s'" % result.block_id)
+		return null
+
+	# Restore external connections
+	for conn_id in external_conns:
+		var peer := get_block(conn_id)
+		if peer != null:
+			# Remove old connections to source blocks
+			for bid in block_ids:
+				peer.remove_connection(bid)
+			# Connect to result
+			peer.add_connection(result.block_id)
+			result.add_connection(conn_id)
+
+	blocks_merged.emit(blocks, result)
+	return result
+
+
+## Recursively adapt blocks to a target LOD level.
+## Subdivides blocks that are below target level, merges blocks above it.
+func adapt_lod(block_ids: Array[String], target_level: int) -> void:
+	for bid in block_ids:
+		var block := get_block(bid)
+		if block == null or not block.active:
+			continue
+
+		if block.lod_level < target_level:
+			# Need more detail — subdivide
+			var children := subdivide_block(bid)
+			if not children.is_empty():
+				var child_ids: Array[String] = []
+				for c in children:
+					child_ids.append(c.block_id)
+				adapt_lod(child_ids, target_level)
+
+		elif block.lod_level > target_level:
+			# Need less detail — find siblings to merge
+			if block.parent_lod_id.is_empty():
+				continue
+			var parent := get_block(block.parent_lod_id)
+			if parent == null:
+				continue
+			# Collect all siblings from the same parent
+			var sibling_ids: Array[String] = []
+			for cid in parent.child_lod_ids:
+				var sibling := get_block(cid)
+				if sibling != null and sibling.active:
+					sibling_ids.append(cid)
+			if sibling_ids.size() >= 2:
+				var merged := merge_blocks(sibling_ids)
+				if merged != null and merged.lod_level > target_level:
+					adapt_lod([merged.block_id] as Array[String], target_level)
+
+
+## Get the LOD subdivision tree for a block.
+## Returns a nested dictionary: { block: Block, children: [subtrees...] }
+func get_subdivision_tree(block_id: String) -> Dictionary:
+	var block := get_block(block_id)
+	if block == null:
+		return {}
+
+	var tree := {"block": block, "children": []}
+	for cid in block.child_lod_ids:
+		var child_tree := get_subdivision_tree(cid)
+		if not child_tree.is_empty():
+			tree["children"].append(child_tree)
+
+	return tree
+
+
+## Get all active (non-subdivided) blocks.
+func get_active_blocks() -> Array[Block]:
+	var result: Array[Block] = []
+	for block: Block in _blocks.values():
+		if block.active:
+			result.append(block)
+	return result
 
 
 # =========================================================================

@@ -64,6 +64,19 @@ const PALETTE := {
 	"house_blue": Color(0.55, 0.65, 0.8),
 	"light_pole": Color(0.35, 0.35, 0.35),
 
+	# Cellular / organic
+	"cell_membrane": Color(0.7, 0.85, 0.7, 0.8),
+	"cell_nucleus": Color(0.3, 0.2, 0.5),
+	"cell_cytoplasm": Color(0.75, 0.9, 0.75, 0.6),
+	"cell_active": Color(0.2, 0.8, 0.3),
+	"cell_dividing": Color(0.9, 0.7, 0.2),
+
+	# Tree (Mother Tree palette)
+	"bark_dark": Color(0.15, 0.08, 0.04),
+	"leaf_canopy": Color(0.08, 0.28, 0.06),
+	"leaf_bright": Color(0.18, 0.42, 0.12),
+	"lantern_glow": Color(0.9, 0.7, 0.2),
+
 	# Fallback
 	"default": Color(0.5, 0.5, 0.5),
 	"debug": Color(1.0, 0.0, 1.0),
@@ -87,6 +100,15 @@ const ROUGHNESS := {
 	"transformer_gray": 0.7,
 	"generator_yellow": 0.65,
 	"light_pole": 0.5,
+	"cell_membrane": 0.3,
+	"cell_nucleus": 0.6,
+	"cell_cytoplasm": 0.2,
+	"cell_active": 0.4,
+	"cell_dividing": 0.5,
+	"bark_dark": 0.9,
+	"leaf_canopy": 0.7,
+	"leaf_bright": 0.65,
+	"lantern_glow": 0.4,
 }
 
 

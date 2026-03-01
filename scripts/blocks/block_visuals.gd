@@ -65,3 +65,13 @@ static func set_powered(block: Block, powered: bool) -> bool:
 ## Convenience: set "warning" visual state (orange emission).
 static func set_warning(block: Block) -> bool:
 	return set_emission(block, Color(1.0, 0.6, 0.0), 1.5)
+
+
+## Convenience: set "dividing" visual state (yellow emission pulse).
+static func set_dividing(block: Block) -> bool:
+	return set_emission(block, Color(0.9, 0.7, 0.2), 2.5)
+
+
+## Convenience: set "merged" visual state (green emission flash).
+static func set_merged(block: Block) -> bool:
+	return set_emission(block, Color(0.2, 0.8, 0.3), 2.0)

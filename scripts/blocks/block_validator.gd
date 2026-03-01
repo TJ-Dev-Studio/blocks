@@ -30,6 +30,7 @@ static func validate(block: Block) -> Array[String]:
 		_validate_position(block, errors)
 	_validate_links(block, errors)
 	_validate_connections(block, errors)
+	_validate_lod(block, errors)
 
 	return errors
 
@@ -62,7 +63,8 @@ static func _validate_dimensions(block: Block, errors: Array[String]) -> void:
 				errors.append(
 					"BOX collision_size exceeds max %.0f: (%.1f, %.1f, %.1f)"
 					% [MAX_DIMENSION, dims.x, dims.y, dims.z])
-		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE:
+		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE, \
+				BlockCategories.SHAPE_SPHERE:
 			if dims.x <= MIN_DIMENSION:
 				errors.append("radius is zero/negative: %.3f" % dims.x)
 			if dims.y <= MIN_DIMENSION:
@@ -122,7 +124,8 @@ static func _validate_visual_collision_ratio(block: Block, errors: Array[String]
 					errors.append(
 						"mesh %s (%.1f) is %.1fx larger than collision (%.1f)"
 						% [axis, m, m / c, c])
-	elif block.collision_shape in [BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE]:
+	elif block.collision_shape in [BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE,
+			BlockCategories.SHAPE_SPHERE]:
 		# Check radius and height
 		if mesh_dims.x > MIN_DIMENSION and col_dims.x > MIN_DIMENSION:
 			var ratio := col_dims.x / mesh_dims.x
@@ -187,3 +190,23 @@ static func _validate_connections(block: Block, errors: Array[String]) -> void:
 		if seen.has(conn_id):
 			errors.append("duplicate connection to '%s'" % conn_id)
 		seen[conn_id] = true
+
+
+static func _validate_lod(block: Block, errors: Array[String]) -> void:
+	if block.lod_level < 0:
+		errors.append("lod_level cannot be negative: %d" % block.lod_level)
+	if block.lod_level > 10:
+		errors.append("lod_level %d exceeds maximum depth of 10" % block.lod_level)
+	if not block.parent_lod_id.is_empty() and not block.block_id.is_empty():
+		if block.parent_lod_id == block.block_id:
+			errors.append("block cannot be its own LOD parent")
+	if block.min_size.x < MIN_DIMENSION or block.min_size.y < MIN_DIMENSION \
+			or block.min_size.z < MIN_DIMENSION:
+		errors.append("min_size has component below MIN_DIMENSION (%.3f)" % MIN_DIMENSION)
+	if not block.dna.is_empty():
+		var axis_pref = block.dna.get("axis_preference", -1)
+		if axis_pref is int and (axis_pref < -1 or axis_pref > 2):
+			errors.append("dna.axis_preference %d out of range [-1, 2]" % axis_pref)
+		var child_count = block.dna.get("child_count", 2)
+		if child_count is int and child_count not in [2, 4, 8]:
+			errors.append("dna.child_count %d must be 2, 4, or 8" % child_count)

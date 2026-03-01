@@ -114,6 +114,28 @@ extends Resource
 @export var created_at: int = 0
 
 # =========================================================================
+# Cellular / LOD
+# =========================================================================
+
+## Subdivision depth (0 = original, 1+ = subdivided child).
+@export var lod_level: int = 0
+
+## Block ID of the block this was subdivided from.
+@export var parent_lod_id: String = ""
+
+## IDs of blocks produced by subdividing this block.
+@export var child_lod_ids: PackedStringArray = PackedStringArray()
+
+## Minimum dimensions before further subdivision stops.
+@export var min_size: Vector3 = Vector3(0.1, 0.1, 0.1)
+
+## DNA: rules governing how this block divides.
+## Keys: axis_preference (int: -1=auto, 0=X, 1=Y, 2=Z),
+##        inherit_tags (bool), inherit_connections (bool),
+##        property_overrides (Dictionary)
+@export var dna: Dictionary = {}
+
+# =========================================================================
 # Links (parent/child hierarchy for compound objects)
 # =========================================================================
 
@@ -183,7 +205,7 @@ func to_collision_dict() -> Dictionary:
 			half_x = collision_size.x * scale_factor / 2.0
 			half_z = collision_size.z * scale_factor / 2.0
 			height = position.y + collision_offset.y + collision_size.y * scale_factor
-		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE:
+		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE, BlockCategories.SHAPE_SPHERE:
 			half_x = collision_size.x * scale_factor  # radius
 			half_z = collision_size.x * scale_factor
 			height = position.y + collision_offset.y + collision_size.y * scale_factor
@@ -220,6 +242,9 @@ func duplicate_block() -> Block:
 	b.destroyed_at = 0
 	b.state = {}
 	b.connections = PackedStringArray()
+	b.lod_level = 0
+	b.parent_lod_id = ""
+	b.child_lod_ids = PackedStringArray()
 	return b
 
 
@@ -288,6 +313,10 @@ func summary() -> String:
 		extras += " conns=%d" % connections.size()
 	if not state.is_empty():
 		extras += " state=%s" % str(state.keys())
+	if lod_level > 0:
+		extras += " lod=%d" % lod_level
+	if not child_lod_ids.is_empty():
+		extras += " lod_children=%d" % child_lod_ids.size()
 	return "[Block '%s' id=%s cat=%s shape=%s interact=%s pos=(%s)%s]" % [
 		block_name, block_id,
 		BlockCategories.category_name(category),
@@ -296,3 +325,209 @@ func summary() -> String:
 		"%.1f, %.1f, %.1f" % [position.x, position.y, position.z],
 		extras,
 	]
+
+
+# =========================================================================
+# Cellular Division / Recombination
+# =========================================================================
+
+## Check if this block can be subdivided on the given axis (or any axis if -1).
+func can_subdivide(axis: int = -1) -> bool:
+	if collision_shape == BlockCategories.SHAPE_NONE:
+		return false
+	if axis == -1:
+		for a in _valid_split_axes():
+			if _dim_for_axis(a) >= _min_for_axis(a) * 2.0:
+				return true
+		return false
+	if axis not in _valid_split_axes():
+		return false
+	return _dim_for_axis(axis) >= _min_for_axis(axis) * 2.0
+
+
+## Split this block into smaller child blocks.
+## axis: 0=X, 1=Y, 2=Z, -1=auto (use DNA preference or split all valid axes).
+## Returns empty array if subdivision is not possible.
+func subdivide(axis: int = -1) -> Array[Block]:
+	var results: Array[Block] = []
+	if not can_subdivide(axis):
+		return results
+
+	var axes_to_split: Array[int] = []
+	if axis >= 0:
+		axes_to_split = [axis]
+	else:
+		var pref: int = dna.get("axis_preference", -1)
+		if pref >= 0 and pref <= 2 and can_subdivide(pref):
+			axes_to_split = [pref]
+		else:
+			for a in _valid_split_axes():
+				if _dim_for_axis(a) >= _min_for_axis(a) * 2.0:
+					axes_to_split.append(a)
+
+	if axes_to_split.is_empty():
+		return results
+
+	var child_count := int(pow(2, axes_to_split.size()))
+	for i in range(child_count):
+		results.append(_make_subdivision_child(i, axes_to_split))
+
+	state["divided"] = true
+	for child in results:
+		child_lod_ids.append(child.block_id)
+
+	return results
+
+
+## Combine this block with another into a merged block.
+## The merge axis is inferred from the position delta between the two blocks.
+func merge_with(other: Block) -> Block:
+	var merged := Block.new()
+	merged.block_name = "%s_merged" % block_name.split("_sub")[0]
+	merged.ensure_id()
+	merged.category = category
+	merged.collision_shape = collision_shape
+	merged.interaction = interaction
+	merged.collision_layer = collision_layer
+	merged.collision_mask_layers = collision_mask_layers.duplicate()
+	merged.collision_offset = collision_offset
+	merged.server_collidable = server_collidable
+	merged.mesh_type = mesh_type
+	merged.material_id = material_id
+	merged.shader_path = shader_path
+	merged.cast_shadow = cast_shadow
+	merged.scale_factor = scale_factor
+	merged.min_size = min_size
+	merged.dna = dna.duplicate(true)
+	merged.lod_level = maxi(lod_level - 1, 0)
+
+	if parent_lod_id == other.parent_lod_id:
+		merged.parent_lod_id = parent_lod_id
+
+	# Infer merge axis from position delta
+	var diff := other.position - position
+	var merge_axis := 0
+	var max_diff := 0.0
+	for a in [0, 1, 2]:
+		if absf(diff[a]) > max_diff:
+			max_diff = absf(diff[a])
+			merge_axis = a
+
+	merged.collision_size = collision_size
+	merged.collision_size[merge_axis] = collision_size[merge_axis] * 2.0
+	merged.position = (position + other.position) / 2.0
+
+	# Mesh size follows collision if it was default
+	if mesh_size != Vector3.ZERO or other.mesh_size != Vector3.ZERO:
+		var ms := mesh_size if mesh_size != Vector3.ZERO else collision_size
+		var oms := other.mesh_size if other.mesh_size != Vector3.ZERO else other.collision_size
+		merged.mesh_size = ms
+		merged.mesh_size[merge_axis] = ms[merge_axis] + oms[merge_axis]
+
+	# Union tags
+	var tag_set := {}
+	for t in tags:
+		tag_set[t] = true
+	for t in other.tags:
+		tag_set[t] = true
+	merged.tags = PackedStringArray(tag_set.keys())
+
+	return merged
+
+
+# --- Subdivision helpers ---
+
+## Return which axes are valid for splitting based on shape type.
+func _valid_split_axes() -> Array[int]:
+	match collision_shape:
+		BlockCategories.SHAPE_BOX:
+			return [0, 1, 2]
+		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE, \
+				BlockCategories.SHAPE_SPHERE:
+			return [1]  # height axis only
+		_:
+			return []
+
+
+## Get the effective dimension for the given axis.
+func _dim_for_axis(axis: int) -> float:
+	match collision_shape:
+		BlockCategories.SHAPE_BOX:
+			return collision_size[axis]
+		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE, \
+				BlockCategories.SHAPE_SPHERE:
+			if axis == 1:
+				return collision_size.y  # height
+			return collision_size.x * 2.0  # diameter
+	return 0.0
+
+
+## Get the minimum dimension for the given axis.
+func _min_for_axis(axis: int) -> float:
+	return min_size[axis]
+
+
+## Create a single subdivision child at the given index for the given split axes.
+func _make_subdivision_child(index: int, axes: Array[int]) -> Block:
+	var child := Block.new()
+	child.block_name = "%s_sub%d" % [block_name, index]
+	child.ensure_id()
+	child.category = category
+	child.collision_shape = collision_shape
+	child.interaction = interaction
+	child.collision_layer = collision_layer
+	child.collision_mask_layers = collision_mask_layers.duplicate()
+	child.collision_offset = collision_offset
+	child.server_collidable = server_collidable
+	child.mesh_type = mesh_type
+	child.material_id = material_id
+	child.shader_path = shader_path
+	child.cast_shadow = cast_shadow
+	child.scale_factor = scale_factor
+	child.creator = creator
+	child.version = version
+	child.lod_level = lod_level + 1
+	child.parent_lod_id = block_id
+	child.min_size = min_size
+	child.dna = dna.duplicate(true)
+
+	if dna.get("inherit_tags", true):
+		child.tags = tags.duplicate()
+
+	# Calculate child dimensions and position offset
+	var new_size := collision_size
+	var pos_offset := Vector3.ZERO
+	for axis_idx in range(axes.size()):
+		var a: int = axes[axis_idx]
+		var bit := (index >> axis_idx) & 1
+		match collision_shape:
+			BlockCategories.SHAPE_BOX:
+				new_size[a] = collision_size[a] / 2.0
+				var quarter := collision_size[a] / 4.0
+				pos_offset[a] = -quarter if bit == 0 else quarter
+			BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE, \
+					BlockCategories.SHAPE_SPHERE:
+				if a == 1:
+					new_size.y = collision_size.y / 2.0
+					var quarter := collision_size.y / 4.0
+					pos_offset.y = -quarter if bit == 0 else quarter
+
+	child.collision_size = new_size
+
+	# Scale mesh_size proportionally if it was set
+	if mesh_size != Vector3.ZERO:
+		var ms := mesh_size
+		for axis_idx in range(axes.size()):
+			var a: int = axes[axis_idx]
+			ms[a] = mesh_size[a] / 2.0
+		child.mesh_size = ms
+
+	child.position = position + pos_offset
+
+	# Apply DNA property overrides
+	var overrides: Dictionary = dna.get("property_overrides", {})
+	for key in overrides:
+		if key in child:
+			child.set(key, overrides[key])
+
+	return child

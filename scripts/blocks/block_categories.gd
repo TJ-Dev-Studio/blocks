@@ -18,6 +18,7 @@ const SHAPE_BOX := 0
 const SHAPE_CYLINDER := 1
 const SHAPE_CAPSULE := 2
 const SHAPE_NONE := 3
+const SHAPE_SPHERE := 4
 
 # --- Interaction types ---
 const INTERACT_SOLID := 0
@@ -66,6 +67,7 @@ static func shape_name(shape: int) -> String:
 		SHAPE_CYLINDER: return "cylinder"
 		SHAPE_CAPSULE: return "capsule"
 		SHAPE_NONE: return "none"
+		SHAPE_SPHERE: return "sphere"
 		_: return "unknown"
 
 
