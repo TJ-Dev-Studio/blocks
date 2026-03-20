@@ -7,7 +7,7 @@ extends Node3D
 ## and edge cases.
 ##
 ## Run headless:
-##   godot --headless --path godot_project --scene-path res://scripts/blocks/tests/test_blocks.tscn
+##   godot --headless --path godot_project --scene-path res://addons/blocks/tests/test_blocks.tscn
 
 var _pass_count := 0
 var _fail_count := 0

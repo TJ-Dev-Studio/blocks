@@ -108,9 +108,9 @@ static func _ensure_registry() -> void:
 	# MUST use load() (runtime) NOT preload() (parse-time) because
 	# these scripts extend BlockPlacementRule — preload creates a
 	# circular dependency that fails at parse time.
-	_rule_registry["endpoint_snap"] = load("res://scripts/blocks/rules/endpoint_snap_rule.gd")
-	_rule_registry["vertical_stack"] = load("res://scripts/blocks/rules/vertical_stack_rule.gd")
+	_rule_registry["endpoint_snap"] = load("res://addons/blocks/rules/endpoint_snap_rule.gd")
+	_rule_registry["vertical_stack"] = load("res://addons/blocks/rules/vertical_stack_rule.gd")
 
 	# Future rules registered here:
-	# _rule_registry["same_height"] = load("res://scripts/blocks/rules/same_height_rule.gd")
-	# _rule_registry["grid_align"] = load("res://scripts/blocks/rules/grid_align_rule.gd")
+	# _rule_registry["same_height"] = load("res://addons/blocks/rules/same_height_rule.gd")
+	# _rule_registry["grid_align"] = load("res://addons/blocks/rules/grid_align_rule.gd")

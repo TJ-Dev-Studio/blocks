@@ -5,7 +5,7 @@ extends Node3D
 ## the variation system, max instance truncation, validation, and edge cases.
 ##
 ## Run headless:
-##   godot --headless --path godot_project --script res://scripts/blocks/tests/run_pattern_tests.gd
+##   godot --headless --path godot_project --script res://addons/blocks/tests/run_pattern_tests.gd
 
 var _pass_count := 0
 var _fail_count := 0

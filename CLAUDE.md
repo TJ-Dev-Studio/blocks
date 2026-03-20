@@ -7,7 +7,7 @@ Declarative JSON → validated Block Resources → Node3D scene tree. A generic,
 This library is structured into 8 domains with strict dependency rules. No domain depends on another at the same level — dependencies only flow inward toward `core/`.
 
 ```
-scripts/blocks/
+addons/blocks/  (or repo root)
 ├── core/                       Entity + value objects (domain primitives)
 │   ├── block.gd                Block Resource — identity, collision, visual, placement
 │   ├── block_categories.gd     Shape/category/interaction enums
@@ -119,13 +119,13 @@ lod/          ← depends on registry/ (BlockRegistry)
 
 ```bash
 # Car assembly suite (157 tests — hierarchy, validation, builder, collision export)
-godot --headless --script res://scripts/blocks/tests/run_tests.gd
+godot --headless --script res://addons/blocks/tests/run_tests.gd
 
 # Power grid suite (394 tests — connections, BFS, cascade failures, visual states)
-godot --headless --script res://scripts/blocks/tests/run_power_grid_tests.gd
+godot --headless --script res://addons/blocks/tests/run_power_grid_tests.gd
 
 # Cellular suite (subdivision, merge, LOD, DNA, amoeba movement)
-godot --headless --script res://scripts/blocks/tests/run_cellular_tests.gd
+godot --headless --script res://addons/blocks/tests/run_cellular_tests.gd
 ```
 
 **Always run tests after modifying any file in this directory.**

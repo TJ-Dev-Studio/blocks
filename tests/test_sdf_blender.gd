@@ -10,7 +10,7 @@ extends Node3D
 ##   - Blend radius effects: k=0 produces hard edges, large k produces smooth
 
 ## Preload the SDF blender since it may not be in global class cache yet.
-const Sdf = preload("res://scripts/blocks/building/block_sdf_blender.gd")
+const Sdf = preload("res://addons/blocks/building/block_sdf_blender.gd")
 ##   - SDF primitives: sphere, box, cylinder distance functions are correct
 ##   - Rotation: elements with rotation_y produce valid mesh
 ##   - AABB computation: padding and bounds are correct

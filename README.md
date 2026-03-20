@@ -243,21 +243,21 @@ func load_zone(zone_path: String, parent: Node3D) -> void:
 Builds a 12-block car (chassis, wheels, windows, headlights, exhaust) to test creation, validation, hierarchy, queries, collision export, and builder output.
 
 ```bash
-godot --headless --script res://scripts/blocks/tests/run_tests.gd
+godot --headless --script res://addons/blocks/tests/run_tests.gd
 ```
 
 ### Power Grid (394 tests)
 Builds a 28-block electrical grid (generator, transformers, power lines, houses, street lights) to stress-test peer connections, BFS message propagation, runtime state, visual emission, cascade failures, and isolated components.
 
 ```bash
-godot --headless --script res://scripts/blocks/tests/run_power_grid_tests.gd
+godot --headless --script res://addons/blocks/tests/run_power_grid_tests.gd
 ```
 
 ### Cellular System
 Tests subdivision, merge, LOD adaptation, DNA inheritance, connection transfer, shape support, amoeba movement, and neural cascade propagation.
 
 ```bash
-godot --headless --script res://scripts/blocks/tests/run_cellular_tests.gd
+godot --headless --script res://addons/blocks/tests/run_cellular_tests.gd
 ```
 
 ### Screenshots

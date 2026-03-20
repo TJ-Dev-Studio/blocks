@@ -6,7 +6,7 @@ extends Node3D
 ## stress tests for the cellular block system.
 ##
 ## Run headless:
-##   godot --headless --script res://scripts/blocks/tests/run_cellular_tests.gd
+##   godot --headless --script res://addons/blocks/tests/run_cellular_tests.gd
 
 var _pass_count := 0
 var _fail_count := 0

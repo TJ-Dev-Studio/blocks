@@ -4,9 +4,9 @@ class_name BlockShapeGen
 ## regenerate meshes. NOT called at runtime — meshes are loaded from .tres.
 ##
 ## Usage (headless):
-##   godot --headless --path godot_project --script res://scripts/blocks/building/run_shape_gen.gd
+##   godot --headless --path godot_project --script res://addons/blocks/building/run_shape_gen.gd
 
-const _BlockMeshModifiers = preload("res://scripts/blocks/building/block_mesh_modifiers.gd")
+const _BlockMeshModifiers = preload("res://addons/blocks/building/block_mesh_modifiers.gd")
 
 
 ## Make a half-torus (arch) ArrayMesh.

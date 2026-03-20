@@ -15,7 +15,7 @@ extends RefCounted
 ##   6. Attenuation per hop: 0.6^n → fades: 0.6, 0.36, 0.22, 0.13...
 
 ## Preload to avoid class_name dependency
-const _BlockSpring = preload("res://scripts/blocks/physics/block_spring.gd")
+const _BlockSpring = preload("res://addons/blocks/physics/block_spring.gd")
 
 ## All spring-capable blocks: {block_id: BlockSpring}
 var _springs: Dictionary = {}

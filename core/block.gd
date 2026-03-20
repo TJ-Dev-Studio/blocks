@@ -401,7 +401,7 @@ func get_all_snap_positions(anchor: Block) -> Array[Vector3]:
 	# Multiple rules — use a temporary stack for intersection.
 	# Load PlacementRuleStack at runtime to avoid circular class_name dependency
 	# (Block -> PlacementRuleStack -> BlockPlacementRule -> Block).
-	var stack_script := load("res://scripts/blocks/rules/placement_rule_stack.gd")
+	var stack_script := load("res://addons/blocks/rules/placement_rule_stack.gd")
 	var stack = stack_script.new()
 	for rule in placement_rules:
 		stack.add_rule(rule)

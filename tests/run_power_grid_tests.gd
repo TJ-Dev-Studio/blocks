@@ -1,9 +1,9 @@
 extends SceneTree
 ## Test runner for the Power Grid test suite.
-## Usage: godot --headless --path godot_project --script res://scripts/blocks/tests/run_power_grid_tests.gd
+## Usage: godot --headless --path godot_project --script res://addons/blocks/tests/run_power_grid_tests.gd
 
 func _init() -> void:
-	var test_scene := load("res://scripts/blocks/tests/test_power_grid.tscn")
+	var test_scene := load("res://addons/blocks/tests/test_power_grid.tscn")
 	if test_scene == null:
 		print("ERROR: Could not load power grid test scene")
 		quit(1)

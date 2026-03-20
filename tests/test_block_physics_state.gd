@@ -5,7 +5,7 @@ extends Node3D
 ## typed accessors, and registry message integration.
 ##
 ## Run headless:
-##   godot --headless --path godot_project --scene-path res://scripts/blocks/tests/test_block_physics_state.tscn
+##   godot --headless --path godot_project --scene-path res://addons/blocks/tests/test_block_physics_state.tscn
 
 var _pass_count := 0
 var _fail_count := 0

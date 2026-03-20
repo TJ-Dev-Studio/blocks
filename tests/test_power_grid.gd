@@ -6,7 +6,7 @@ extends Node3D
 ## power propagation, cascade failures, path finding, and more.
 ##
 ## Run headless:
-##   godot --headless --path godot_project --script res://scripts/blocks/tests/run_power_grid_tests.gd
+##   godot --headless --path godot_project --script res://addons/blocks/tests/run_power_grid_tests.gd
 
 var _pass_count := 0
 var _fail_count := 0
