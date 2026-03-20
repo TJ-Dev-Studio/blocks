@@ -97,17 +97,17 @@ Builds a Car from 10 blocks (chassis, 4 wheels, steering wheel, 2 headlights, en
 ```bash
 # Car test (157 tests)
 godot --headless --path godot_project \
-  --script res://scripts/blocks/tests/run_tests.gd
+  --script res://addons/blocks/tests/run_tests.gd
 
 # Power Grid test (394 tests)
 godot --headless --path godot_project \
-  --script res://scripts/blocks/tests/run_power_grid_tests.gd
+  --script res://addons/blocks/tests/run_power_grid_tests.gd
 
 # Both suites
 godot --headless --path godot_project \
-  --script res://scripts/blocks/tests/run_tests.gd && \
+  --script res://addons/blocks/tests/run_tests.gd && \
 godot --headless --path godot_project \
-  --script res://scripts/blocks/tests/run_power_grid_tests.gd
+  --script res://addons/blocks/tests/run_power_grid_tests.gd
 ```
 
 ### Visual Capture
@@ -115,17 +115,17 @@ godot --headless --path godot_project \
 ```bash
 # Unpowered (frame 3)
 npx tsx tools/gak/src/preview-capture.ts godot_project \
-  "res://scripts/blocks/tests/power_grid_visual.tscn" \
+  "res://addons/blocks/tests/power_grid_visual.tscn" \
   -r 1280x720 -f 3 -o grid_unpowered.png
 
 # Propagating (frame 5)
 npx tsx tools/gak/src/preview-capture.ts godot_project \
-  "res://scripts/blocks/tests/power_grid_visual.tscn" \
+  "res://addons/blocks/tests/power_grid_visual.tscn" \
   -r 1280x720 -f 5 -o grid_propagating.png
 
 # Fully powered (frame 8)
 npx tsx tools/gak/src/preview-capture.ts godot_project \
-  "res://scripts/blocks/tests/power_grid_visual.tscn" \
+  "res://addons/blocks/tests/power_grid_visual.tscn" \
   -r 1280x720 -f 8 -o grid_powered.png
 ```
 
