@@ -12,6 +12,8 @@ const STRUCTURE := 2
 const CREATURE := 3
 const EFFECT := 4
 const TRIGGER_CAT := 5
+const FURNISHING := 6
+const TREE_CAT := 7
 
 # --- Collision shapes ---
 const SHAPE_BOX := 0
@@ -19,6 +21,12 @@ const SHAPE_CYLINDER := 1
 const SHAPE_CAPSULE := 2
 const SHAPE_NONE := 3
 const SHAPE_SPHERE := 4
+const SHAPE_RAMP := 5
+const SHAPE_DOME := 6
+const SHAPE_CONE := 7
+const SHAPE_TORUS := 8
+const SHAPE_ARCH := 9
+const SHAPE_ROCK := 10
 
 # --- Interaction types ---
 const INTERACT_SOLID := 0
@@ -29,6 +37,7 @@ const INTERACT_DESTRUCTIBLE := 4
 const INTERACT_WATER := 5
 const INTERACT_ONE_WAY := 6
 const INTERACT_BRIDGE := 7
+const INTERACT_NONE := 8
 
 # --- Creator types ---
 const CREATOR_HUMAN := 0
@@ -58,6 +67,8 @@ static func category_name(cat: int) -> String:
 		CREATURE: return "creature"
 		EFFECT: return "effect"
 		TRIGGER_CAT: return "trigger"
+		FURNISHING: return "furnishing"
+		TREE_CAT: return "tree"
 		_: return "unknown"
 
 
@@ -68,6 +79,12 @@ static func shape_name(shape: int) -> String:
 		SHAPE_CAPSULE: return "capsule"
 		SHAPE_NONE: return "none"
 		SHAPE_SPHERE: return "sphere"
+		SHAPE_RAMP: return "ramp"
+		SHAPE_DOME: return "dome"
+		SHAPE_CONE: return "cone"
+		SHAPE_TORUS: return "torus"
+		SHAPE_ARCH: return "arch"
+		SHAPE_ROCK: return "rock"
 		_: return "unknown"
 
 
@@ -81,6 +98,7 @@ static func interaction_name(inter: int) -> String:
 		INTERACT_WATER: return "water"
 		INTERACT_ONE_WAY: return "one_way"
 		INTERACT_BRIDGE: return "bridge"
+		INTERACT_NONE: return "none"
 		_: return "unknown"
 
 

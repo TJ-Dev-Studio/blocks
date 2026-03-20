@@ -165,6 +165,42 @@ func get_blocks_near(pos: Vector3, radius: float) -> Array[Block]:
 	return result
 
 
+## Query registry for the nearest block within snap_radius of hit_point.
+## Returns a Dictionary with block info for the VR inspector, or {} if none found.
+func get_block_at_position(hit_point: Vector3, snap_radius: float) -> Dictionary:
+	var nearest: Block = null
+	var nearest_dist_sq := snap_radius * snap_radius
+
+	var min_gx := int(floor((hit_point.x - snap_radius) / GRID_CELL_SIZE))
+	var max_gx := int(floor((hit_point.x + snap_radius) / GRID_CELL_SIZE))
+	var min_gz := int(floor((hit_point.z - snap_radius) / GRID_CELL_SIZE))
+	var max_gz := int(floor((hit_point.z + snap_radius) / GRID_CELL_SIZE))
+
+	for gx in range(min_gx, max_gx + 1):
+		for gz in range(min_gz, max_gz + 1):
+			var key := "%d_%d" % [gx, gz]
+			if not _grid.has(key):
+				continue
+			for block: Block in _grid[key]:
+				var d := block.position.distance_squared_to(hit_point)
+				if d < nearest_dist_sq:
+					nearest_dist_sq = d
+					nearest = block
+
+	if nearest == null:
+		return {}
+
+	return {
+		"block_id":      nearest.block_id,
+		"assembly_name": nearest.block_name,
+		"element_type":  nearest.get("element_type") if "element_type" in nearest else "",
+		"category":      nearest.category,
+		"material":      nearest.get("material_id") if "material_id" in nearest else "",
+		"position":      nearest.position,
+		"size":          nearest.dimensions if "dimensions" in nearest else Vector3.ONE,
+	}
+
+
 ## Get all children of a block (resolved from child_ids).
 func get_child_blocks(block_id: String) -> Array[Block]:
 	var result: Array[Block] = []
@@ -298,6 +334,33 @@ func connect_blocks(block_id_a: String, block_id_b: String) -> bool:
 	a.add_connection(block_id_b)
 	b.add_connection(block_id_a)
 	return true
+
+
+## Connect two blocks with validation — runs all placement rules first.
+## Returns: {"valid": bool, "errors": Array[String]}
+## If validation fails, blocks are NOT connected and errors are reported.
+## If neither block has placement rules, connects unconditionally.
+func connect_blocks_validated(block_id_a: String, block_id_b: String) -> Dictionary:
+	var a := get_block(block_id_a)
+	var b := get_block(block_id_b)
+	if a == null or b == null:
+		return {"valid": false, "errors": ["Block not found"] as Array[String]}
+
+	# Run validators from both sides
+	var result_a: Dictionary = a.validate_connection_to(b)
+	var result_b: Dictionary = b.validate_connection_to(a)
+
+	var all_errors: Array[String] = []
+	all_errors.append_array(result_a.get("errors", []))
+	all_errors.append_array(result_b.get("errors", []))
+
+	if not all_errors.is_empty():
+		return {"valid": false, "errors": all_errors}
+
+	# Passed — wire it up
+	a.add_connection(block_id_b)
+	b.add_connection(block_id_a)
+	return {"valid": true, "errors": [] as Array[String]}
 
 
 ## Disconnect two blocks bidirectionally.

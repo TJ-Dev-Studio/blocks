@@ -1698,12 +1698,16 @@ func _test_builder_grid() -> void:
 	var pl0: Block = _grid_blocks["power_line_0"]
 	if pl0.node:
 		var pl0_mesh := pl0.node.get_node_or_null("Mesh") as MeshInstance3D
-		if pl0_mesh and pl0_mesh.material_override is StandardMaterial3D:
+		if pl0_mesh and pl0_mesh.material_override is ShaderMaterial:
+			var pl0_mat := pl0_mesh.material_override as ShaderMaterial
+			_assert(pl0_mat.get_shader_parameter("albedo_color") == BlockMaterials.PALETTE["wire_copper"],
+				"power_line_0 has wire_copper material (shader)")
+		elif pl0_mesh and pl0_mesh.material_override is StandardMaterial3D:
 			var pl0_mat := pl0_mesh.material_override as StandardMaterial3D
 			_assert(pl0_mat.albedo_color == BlockMaterials.PALETTE["wire_copper"],
-				"power_line_0 has wire_copper material")
+				"power_line_0 has wire_copper material (fallback)")
 		else:
-			_assert(false, "power_line_0 has StandardMaterial3D")
+			_assert(false, "power_line_0 has valid material")
 	else:
 		_assert(false, "power_line_0 has node")
 

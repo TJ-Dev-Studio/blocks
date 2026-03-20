@@ -75,3 +75,50 @@ static func set_dividing(block: Block) -> bool:
 ## Convenience: set "merged" visual state (green emission flash).
 static func set_merged(block: Block) -> bool:
 	return set_emission(block, Color(0.2, 0.8, 0.3), 2.0)
+
+
+## Walk the connection chain starting from a block, coloring each sequentially.
+## For a linear chain (each block has ≤2 connections), this walks from start
+## to end, applying a rainbow hue gradient. Returns the ordered chain.
+##
+## registry: BlockRegistry instance for block lookups.
+## world_root: Node3D to create the tween on.
+## callback: Optional callable(block, index, total) invoked per step.
+## delay: seconds between each color step (default 0.08 = ~5 seconds for 58 blocks)
+static func run_color_chain(start_block_id: String, registry, world_root: Node3D, callback: Callable = Callable(), delay: float = 0.08) -> Array:
+	var chain: Array = []
+	var visited := {}
+	var current_id := start_block_id
+
+	# Walk the chain sequentially (each block has ≤2 connections in a line)
+	while current_id != "" and not visited.has(current_id):
+		visited[current_id] = true
+		var block = registry.get_block(current_id)
+		if block == null:
+			break
+		chain.append(block)
+
+		# Find next unvisited connection
+		current_id = ""
+		for conn_id in block.connections:
+			if not visited.has(conn_id):
+				current_id = conn_id
+				break
+
+	# Animate color through chain using tween
+	if not chain.is_empty() and world_root:
+		var tween := world_root.create_tween()
+		for i in range(chain.size()):
+			var b = chain[i]
+			var hue: float = float(i) / float(chain.size())
+			var color := Color.from_hsv(hue, 0.8, 1.0)
+			var idx := i
+			var total := chain.size()
+			tween.tween_callback(func():
+				BlockVisuals.set_color(b, color)
+				if callback.is_valid():
+					callback.call(b, idx, total)
+			)
+			tween.tween_interval(delay)
+
+	return chain

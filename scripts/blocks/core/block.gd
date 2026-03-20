@@ -36,7 +36,7 @@ extends Resource
 @export var collision_shape: int = BlockCategories.SHAPE_BOX
 
 ## Dimensions of the collision shape.
-## BOX: Vector3(width, height, depth).
+## BOX/RAMP: Vector3(width, height, depth).
 ## CYLINDER/CAPSULE: Vector3(radius, height, 0) — z unused.
 @export var collision_size: Vector3 = Vector3(1.0, 1.0, 1.0)
 
@@ -68,7 +68,7 @@ extends Resource
 # Visual
 # =========================================================================
 
-## 0 = primitive mesh (derived from collision_shape), 1 = custom scene.
+## 0 = primitive mesh (derived from collision_shape), 1 = custom scene, 2 = GLB model.
 @export var mesh_type: int = 0
 
 ## Primitive mesh dimensions (if Vector3.ZERO, uses collision_size).
@@ -85,6 +85,30 @@ extends Resource
 
 ## Whether this block casts shadows.
 @export var cast_shadow: bool = false
+
+## Per-element color tint multiplied against palette material color.
+## White (1,1,1,1) = no tint (default). Parsed from visual.color in JSON.
+@export var color_tint: Color = Color.WHITE
+
+## Per-element shader parameter overrides (roughness, metallic, surface_noise_scale, surface_noise_strength).
+## Empty dict = use palette defaults. Keys are shader uniform names.
+@export var material_params: Dictionary = {}
+
+## Procedural material type. Empty string = use standard palette pipeline.
+## Parsed from visual.material_type in JSON.
+## Valid values: "bark", "stone", "moss", "water", "wood"
+@export var material_type_id: String = ""
+
+## Multi-material slot definitions. Empty = single material from material_id.
+## Each dict: { "palette_key": String, "params": Dictionary (optional) }
+## When non-empty, block is excluded from BlockMeshMerger batching.
+@export var materials_list: Array = []
+
+## Noise vertex displacement strength (0 = disabled). Applied post-merge to visual mesh only.
+@export var noise_strength: float = 0.0
+
+## Noise frequency scale (lower = smoother, higher = rougher). Applied post-merge.
+@export var noise_scale: float = 3.0
 
 # =========================================================================
 # Placement (instance-specific)
@@ -171,7 +195,28 @@ var destroyed_at: int = 0
 
 ## Mutable runtime state dictionary. Tracks dynamic properties like
 ## "powered", "health", "temperature". Not persisted to .tres.
+##
+## Physics state keys (managed by BlockPhysicsState):
+##   "force_vec"  — Vector3: accumulated force acting on block
+##   "velocity"   — Vector3: last committed velocity (propagation layer)
+##   "mass"       — float:   rest mass (default 1.0)
+##   "damping"    — float:   per-tick velocity damping (default 0.85)
+##   "hop_count"  — int:     propagation hops received this wave
+##   "displaced"  — bool:    whether displaced from rest this wave
+##
+## Message types (see BlockMessages): FORCE_PROPAGATE, DISPLACEMENT_RESULT
 var state: Dictionary = {}
+
+## Path to the .block.json file this was loaded from (empty if programmatic).
+var source_file: String = ""
+
+## Runtime neuron (null if no neuron defined in block-file).
+var neuron = null  # BlockNeuron
+
+## Placement validators attached to this block. Array of BlockPlacementRule.
+## Rules constrain where this block can be placed and which connections are valid.
+## Parsed from "validators" in block-file JSON; can also be added at runtime.
+var placement_rules: Array = []
 
 # =========================================================================
 # Methods
@@ -201,7 +246,7 @@ func to_collision_dict() -> Dictionary:
 	var height: float
 
 	match collision_shape:
-		BlockCategories.SHAPE_BOX:
+		BlockCategories.SHAPE_BOX, BlockCategories.SHAPE_RAMP:
 			half_x = collision_size.x * scale_factor / 2.0
 			half_z = collision_size.z * scale_factor / 2.0
 			height = position.y + collision_offset.y + collision_size.y * scale_factor
@@ -209,6 +254,15 @@ func to_collision_dict() -> Dictionary:
 			half_x = collision_size.x * scale_factor  # radius
 			half_z = collision_size.x * scale_factor
 			height = position.y + collision_offset.y + collision_size.y * scale_factor
+		BlockCategories.SHAPE_CONE, BlockCategories.SHAPE_ROCK:
+			half_x = collision_size.x * scale_factor  # radius
+			half_z = collision_size.x * scale_factor
+			height = position.y + collision_offset.y + collision_size.y * scale_factor
+		BlockCategories.SHAPE_TORUS, BlockCategories.SHAPE_ARCH:
+			half_x = collision_size.y * scale_factor  # outer_radius
+			half_z = collision_size.y * scale_factor
+			var ring_r := (collision_size.y - collision_size.x) * scale_factor
+			height = position.y + collision_offset.y + ring_r * 2.0
 		_:
 			return {}
 
@@ -245,6 +299,10 @@ func duplicate_block() -> Block:
 	b.lod_level = 0
 	b.parent_lod_id = ""
 	b.child_lod_ids = PackedStringArray()
+	b.color_tint = color_tint
+	b.material_params = material_params.duplicate()
+	b.material_type_id = material_type_id
+	b.materials_list = materials_list.duplicate()
 	return b
 
 
@@ -304,6 +362,50 @@ func has_peer_connections() -> bool:
 ## Check if connected to a specific peer.
 func is_connected_to(peer_block_id: String) -> bool:
 	return peer_block_id in connections
+
+
+## Add a placement validator rule.
+func add_placement_rule(rule) -> void:
+	placement_rules.append(rule)
+
+
+## Validate whether connecting to another block satisfies placement rules.
+## Uses OR logic: valid if ANY rule accepts the connection. This allows
+## blocks to have multiple connection types (e.g. endpoint_snap for horizontal
+## neighbors + vertical_stack for blocks above/below).
+## Returns: {"valid": bool, "errors": Array[String]}
+## If no placement rules exist, connection is always valid.
+func validate_connection_to(other: Block) -> Dictionary:
+	if placement_rules.is_empty():
+		return {"valid": true, "errors": [] as Array[String]}
+	var all_errors: Array[String] = []
+	for rule in placement_rules:
+		var result: Dictionary = rule.check_connection(self, other)
+		if result.get("valid", false):
+			# At least one rule accepts → connection valid
+			return {"valid": true, "errors": [] as Array[String]}
+		all_errors.append_array(result.get("errors", []))
+	if all_errors.is_empty():
+		return {"valid": true, "errors": [] as Array[String]}
+	return {"valid": false, "errors": all_errors}
+
+
+## Get all valid snap positions for this block relative to an anchor.
+## Combines results from all placement rules. If multiple rules provide
+## positions, returns the intersection (positions satisfying all rules).
+func get_all_snap_positions(anchor: Block) -> Array[Vector3]:
+	if placement_rules.is_empty():
+		return [] as Array[Vector3]
+	if placement_rules.size() == 1:
+		return placement_rules[0].get_snap_positions(self, anchor)
+	# Multiple rules — use a temporary stack for intersection.
+	# Load PlacementRuleStack at runtime to avoid circular class_name dependency
+	# (Block -> PlacementRuleStack -> BlockPlacementRule -> Block).
+	var stack_script := load("res://scripts/blocks/rules/placement_rule_stack.gd")
+	var stack = stack_script.new()
+	for rule in placement_rules:
+		stack.add_rule(rule)
+	return stack.get_snap_positions(self, anchor)
 
 
 ## Human-readable summary for debugging.
@@ -396,6 +498,10 @@ func merge_with(other: Block) -> Block:
 	merged.material_id = material_id
 	merged.shader_path = shader_path
 	merged.cast_shadow = cast_shadow
+	merged.color_tint = color_tint
+	merged.material_params = material_params.duplicate()
+	merged.material_type_id = material_type_id
+	merged.materials_list = materials_list.duplicate()
 	merged.scale_factor = scale_factor
 	merged.min_size = min_size
 	merged.dna = dna.duplicate(true)
@@ -440,11 +546,13 @@ func merge_with(other: Block) -> Block:
 ## Return which axes are valid for splitting based on shape type.
 func _valid_split_axes() -> Array[int]:
 	match collision_shape:
-		BlockCategories.SHAPE_BOX:
+		BlockCategories.SHAPE_BOX, BlockCategories.SHAPE_RAMP:
 			return [0, 1, 2]
 		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE, \
-				BlockCategories.SHAPE_SPHERE:
+				BlockCategories.SHAPE_SPHERE, BlockCategories.SHAPE_CONE:
 			return [1]  # height axis only
+		BlockCategories.SHAPE_TORUS, BlockCategories.SHAPE_ARCH, BlockCategories.SHAPE_ROCK:
+			return []  # no subdivision for organic shapes
 		_:
 			return []
 
@@ -452,10 +560,10 @@ func _valid_split_axes() -> Array[int]:
 ## Get the effective dimension for the given axis.
 func _dim_for_axis(axis: int) -> float:
 	match collision_shape:
-		BlockCategories.SHAPE_BOX:
+		BlockCategories.SHAPE_BOX, BlockCategories.SHAPE_RAMP:
 			return collision_size[axis]
 		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE, \
-				BlockCategories.SHAPE_SPHERE:
+				BlockCategories.SHAPE_SPHERE, BlockCategories.SHAPE_CONE:
 			if axis == 1:
 				return collision_size.y  # height
 			return collision_size.x * 2.0  # diameter
@@ -483,6 +591,9 @@ func _make_subdivision_child(index: int, axes: Array[int]) -> Block:
 	child.material_id = material_id
 	child.shader_path = shader_path
 	child.cast_shadow = cast_shadow
+	child.color_tint = color_tint
+	child.material_params = material_params.duplicate()
+	child.material_type_id = material_type_id
 	child.scale_factor = scale_factor
 	child.creator = creator
 	child.version = version
@@ -501,7 +612,7 @@ func _make_subdivision_child(index: int, axes: Array[int]) -> Block:
 		var a: int = axes[axis_idx]
 		var bit := (index >> axis_idx) & 1
 		match collision_shape:
-			BlockCategories.SHAPE_BOX:
+			BlockCategories.SHAPE_BOX, BlockCategories.SHAPE_RAMP:
 				new_size[a] = collision_size[a] / 2.0
 				var quarter := collision_size[a] / 4.0
 				pos_offset[a] = -quarter if bit == 0 else quarter
