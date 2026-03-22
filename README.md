@@ -4,6 +4,20 @@ A composable Block primitive library for Godot 4. Blocks are lightweight `Resour
 
 809+ tests. Zero dependencies. Drop into any Godot 4.4+ project.
 
+## Why JSON + Git
+
+Your entire game world lives as plain-text JSON inside git. No proprietary binary formats. No scene files that can't be diffed. No merge conflicts on level design.
+
+- **Every object** is a JSON entry — readable, diffable, mergeable
+- **Multiple developers** can build different areas simultaneously and merge cleanly
+- **`git blame`** shows who placed every object. **`git revert`** undoes any change instantly
+- **Pull requests for level design** — review world changes the same way you review code
+- **Featherweight world data** — the entire world layout is plain text. Binary assets (GLB models, textures) are the only heavy files
+- **AI-friendly** — agents can read, generate, and modify world data programmatically. JSON is their native language
+- **No vendor lock-in** — open data format, portable, engine-agnostic in principle
+
+Think of it like HTML for 3D worlds: Blocks is the rendering engine that turns declarative JSON markup into a living 3D scene.
+
 ## Vision
 
 Blocks are cells and neurons simultaneously. They divide like biological cells, connect like neural networks, and recombine like amoebas. A single block can subdivide into smaller blocks for higher detail, merge back together for lower detail, and encode division rules in DNA that propagate through generations.
