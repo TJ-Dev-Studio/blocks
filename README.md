@@ -1,4 +1,6 @@
-# Blocks
+<p align="center">
+  <img src="logo.png" alt="Blocks" width="400">
+</p>
 
 A composable Block primitive library for Godot 4. Blocks are lightweight `Resource` objects that define geometry, collision, materials, lighting, interaction rules, parent-child hierarchies, peer-to-peer connections, cellular division, LOD adaptation, and DNA-encoded behavior rules.
 
