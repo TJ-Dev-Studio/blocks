@@ -186,6 +186,22 @@ static func file_to_block(data: Dictionary) -> Block:
 		neuron.init_from_file(neuron_data, block.block_id)
 		block.neuron = neuron
 
+	# Light
+	var light_data: Dictionary = data.get("light", {})
+	if not light_data.is_empty():
+		var lc := {}
+		lc["type"] = light_data.get("type", "omni")
+		var light_color_arr: Array = light_data.get("color", [])
+		if light_color_arr.size() >= 3:
+			lc["color"] = Color(float(light_color_arr[0]), float(light_color_arr[1]), float(light_color_arr[2]))
+		lc["energy"] = float(light_data.get("energy", 1.0))
+		lc["range"] = float(light_data.get("range", 4.0))
+		lc["group"] = light_data.get("group", "steady")
+		lc["shadow"] = bool(light_data.get("shadow", false))
+		if light_data.has("spot_angle"):
+			lc["spot_angle"] = float(light_data["spot_angle"])
+		block.light_config = lc
+
 	# Validators (placement rules from JSON)
 	var validators: Array = data.get("validators", [])
 	for v in validators:
@@ -286,6 +302,20 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable) -> Ar
 			if not child_blend_group.is_empty():
 				child_block.state["_blend_group"] = child_blend_group
 				child_block.state["_blend_mode"] = child_blend.get("blend_mode", "union")
+
+			# Assembly child can override the element's light config
+			var child_light: Dictionary = effective_child.get("light", {})
+			if not child_light.is_empty():
+				var lc := {}
+				lc["type"] = child_light.get("type", "omni")
+				var lc_color_arr: Array = child_light.get("color", [])
+				if lc_color_arr.size() >= 3:
+					lc["color"] = Color(float(lc_color_arr[0]), float(lc_color_arr[1]), float(lc_color_arr[2]))
+				lc["energy"] = float(child_light.get("energy", 1.0))
+				lc["range"] = float(child_light.get("range", 4.0))
+				lc["group"] = child_light.get("group", "steady")
+				lc["shadow"] = bool(child_light.get("shadow", false))
+				child_block.light_config = lc
 
 			child_block.ensure_id()
 			child_block.parent_id = root.block_id
@@ -431,5 +461,18 @@ static func _set_block_dotted(block: Block, section: String, prop: String, value
 			match prop:
 				"min_size": block.min_size = _arr_to_vec3(value)
 				"dna": block.dna = value if value is Dictionary else {}
+		"light":
+			if block.light_config.is_empty():
+				block.light_config = {}
+			match prop:
+				"type": block.light_config["type"] = str(value)
+				"energy": block.light_config["energy"] = float(value)
+				"range": block.light_config["range"] = float(value)
+				"group": block.light_config["group"] = str(value)
+				"shadow": block.light_config["shadow"] = bool(value)
+				"color":
+					var arr: Array = value if value is Array else []
+					if arr.size() >= 3:
+						block.light_config["color"] = Color(float(arr[0]), float(arr[1]), float(arr[2]))
 		_:
 			push_warning("[BlockFile] Unknown override section: %s.%s" % [section, prop])

@@ -110,6 +110,11 @@ extends Resource
 ## Noise frequency scale (lower = smoother, higher = rougher). Applied post-merge.
 @export var noise_scale: float = 3.0
 
+## Light configuration from JSON "light" section. Empty = no light.
+## Keys: type (String: "omni"|"spot"), color (Color), energy (float),
+##        range (float), group (String), shadow (bool), spot_angle (float).
+@export var light_config: Dictionary = {}
+
 # =========================================================================
 # Placement (instance-specific)
 # =========================================================================
@@ -303,6 +308,7 @@ func duplicate_block() -> Block:
 	b.material_params = material_params.duplicate()
 	b.material_type_id = material_type_id
 	b.materials_list = materials_list.duplicate()
+	b.light_config = light_config.duplicate()
 	return b
 
 
@@ -413,6 +419,8 @@ func summary() -> String:
 	var extras := ""
 	if has_peer_connections():
 		extras += " conns=%d" % connections.size()
+	if not light_config.is_empty():
+		extras += " light=%s" % light_config.get("group", "omni")
 	if not state.is_empty():
 		extras += " state=%s" % str(state.keys())
 	if lod_level > 0:

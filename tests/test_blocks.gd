@@ -58,6 +58,10 @@ func _ready() -> void:
 	_test_multi_material_parsing()
 	_test_multi_material_override_parsing()
 	_test_multi_material_build()
+	_test_light_omni_build()
+	_test_light_spot_build()
+	_test_light_file_parsing()
+	_test_light_duplication()
 
 	# Summary
 	print("")
@@ -2018,3 +2022,159 @@ func _test_multi_material_build() -> void:
 			"MMTL-02: multi-material path uses surface overrides, not material_override")
 
 	parent.queue_free()
+
+
+# =========================================================================
+# Light system tests
+# =========================================================================
+
+func _test_light_omni_build() -> void:
+	_section("Light: OmniLight3D Build")
+
+	var block := Block.new()
+	block.block_name = "test_light_omni"
+	block.collision_shape = BlockCategories.SHAPE_SPHERE
+	block.collision_size = Vector3(0.15, 0.3, 0.15)
+	block.material_id = "glow_orange"
+	block.light_config = {
+		"type": "omni",
+		"color": Color(1.0, 0.7, 0.3),
+		"energy": 1.2,
+		"range": 5.0,
+		"group": "lanterns",
+		"shadow": false,
+	}
+	block.ensure_id()
+
+	var parent := Node3D.new()
+	add_child(parent)
+	var root := BlockBuilder.build(block, parent)
+
+	_assert(root != null, "LIGHT-01: omni light block builds successfully")
+
+	var light_node: Node = root.get_node_or_null("BlockLight") if root != null else null
+	_assert(light_node != null, "LIGHT-02: BlockLight child node exists")
+	_assert(light_node is OmniLight3D, "LIGHT-03: light node is OmniLight3D")
+
+	if light_node is OmniLight3D:
+		var omni := light_node as OmniLight3D
+		_assert(is_equal_approx(omni.light_energy, 1.2), "LIGHT-04: energy is 1.2")
+		_assert(is_equal_approx(omni.omni_range, 5.0), "LIGHT-05: range is 5.0")
+		_assert(omni.light_color.is_equal_approx(Color(1.0, 0.7, 0.3)),
+			"LIGHT-06: color matches config")
+		_assert(not omni.shadow_enabled, "LIGHT-07: shadow disabled")
+		_assert(omni.is_in_group("block_lanterns"), "LIGHT-08: in group block_lanterns")
+		_assert(is_equal_approx(float(omni.get_meta("base_energy")), 1.2), "LIGHT-09: base_energy metadata set")
+
+	parent.queue_free()
+
+
+func _test_light_spot_build() -> void:
+	_section("Light: SpotLight3D Build")
+
+	var block := Block.new()
+	block.block_name = "test_light_spot"
+	block.collision_shape = BlockCategories.SHAPE_BOX
+	block.collision_size = Vector3(0.5, 0.5, 0.5)
+	block.material_id = "glow_yellow"
+	block.light_config = {
+		"type": "spot",
+		"energy": 2.0,
+		"range": 8.0,
+		"group": "steady",
+		"shadow": true,
+		"spot_angle": 30.0,
+	}
+	block.ensure_id()
+
+	var parent := Node3D.new()
+	add_child(parent)
+	var root := BlockBuilder.build(block, parent)
+
+	_assert(root != null, "LSPOT-01: spot light block builds successfully")
+
+	var light_node: Node = root.get_node_or_null("BlockLight") if root != null else null
+	_assert(light_node is SpotLight3D, "LSPOT-02: light node is SpotLight3D")
+
+	if light_node is SpotLight3D:
+		var spot := light_node as SpotLight3D
+		_assert(is_equal_approx(spot.light_energy, 2.0), "LSPOT-03: energy is 2.0")
+		_assert(is_equal_approx(spot.spot_range, 8.0), "LSPOT-04: range is 8.0")
+		_assert(is_equal_approx(spot.spot_angle, 30.0), "LSPOT-05: spot_angle is 30.0")
+		_assert(spot.shadow_enabled, "LSPOT-06: shadow enabled")
+		_assert(spot.is_in_group("block_steady"), "LSPOT-07: in group block_steady")
+
+	parent.queue_free()
+
+
+func _test_light_file_parsing() -> void:
+	_section("Light: JSON Parsing")
+
+	var data := {
+		"format_version": "1.0",
+		"block_type": "element",
+		"identity": {"name": "test_light", "category": "effect", "tags": ["light"]},
+		"collision": {"shape": "sphere", "size": [0.15, 0.3, 0.15], "interaction": "none",
+			"server_collidable": false},
+		"visual": {"material": "glow_orange", "cast_shadow": false},
+		"light": {
+			"type": "omni",
+			"color": [1.0, 0.8, 0.4],
+			"energy": 1.5,
+			"range": 6.0,
+			"group": "lanterns",
+			"shadow": false,
+		},
+	}
+
+	var block := BlockFile.file_to_block(data)
+	_assert(not block.light_config.is_empty(), "LPARSE-01: light_config is populated")
+	_assert(block.light_config.get("type") == "omni", "LPARSE-02: type is omni")
+	_assert(is_equal_approx(block.light_config.get("energy", 0.0), 1.5),
+		"LPARSE-03: energy parsed as 1.5")
+	_assert(is_equal_approx(block.light_config.get("range", 0.0), 6.0),
+		"LPARSE-04: range parsed as 6.0")
+	_assert(block.light_config.get("group") == "lanterns", "LPARSE-05: group is lanterns")
+	_assert(block.light_config.has("color"), "LPARSE-06: color key exists")
+	if block.light_config.has("color"):
+		var c: Color = block.light_config["color"]
+		_assert(is_equal_approx(c.r, 1.0) and is_equal_approx(c.g, 0.8),
+			"LPARSE-07: color parsed correctly")
+
+	# Test block WITHOUT light section — light_config should be empty
+	var data_no_light := {
+		"format_version": "1.0",
+		"block_type": "element",
+		"identity": {"name": "no_light", "category": "prop"},
+		"collision": {"shape": "box", "size": [1, 1, 1]},
+		"visual": {"material": "default"},
+	}
+	var block_no_light := BlockFile.file_to_block(data_no_light)
+	_assert(block_no_light.light_config.is_empty(),
+		"LPARSE-08: block without light section has empty light_config")
+
+
+func _test_light_duplication() -> void:
+	_section("Light: Duplication")
+
+	var block := Block.new()
+	block.block_name = "light_dup_source"
+	block.light_config = {
+		"type": "omni",
+		"color": Color(0.5, 1.0, 0.3),
+		"energy": 0.8,
+		"range": 3.0,
+		"group": "biolum",
+	}
+	block.ensure_id()
+
+	var clone := block.duplicate_block()
+	_assert(not clone.light_config.is_empty(), "LDUP-01: clone has light_config")
+	_assert(clone.light_config.get("group") == "biolum", "LDUP-02: group preserved")
+	_assert(is_equal_approx(clone.light_config.get("energy", 0.0), 0.8),
+		"LDUP-03: energy preserved")
+
+	# Verify independence — modify clone, original unchanged
+	clone.light_config["energy"] = 999.0
+	_assert(is_equal_approx(block.light_config.get("energy", 0.0), 0.8),
+		"LDUP-04: original unaffected by clone modification")

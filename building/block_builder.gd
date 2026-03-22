@@ -34,6 +34,10 @@ static func build(block: Block, parent: Node3D) -> Node3D:
 	elif block.mesh_type == 2 and not block.scene_path.is_empty():
 		_build_glb_visual(root, block)
 
+	# Light
+	if not block.light_config.is_empty():
+		_build_light(root, block)
+
 	# Tag with block_id for reverse lookup
 	root.set_meta("block_id", block.block_id)
 
@@ -45,6 +49,51 @@ static func build(block: Block, parent: Node3D) -> Node3D:
 		block.neuron.activate()
 
 	return root
+
+
+## Build an OmniLight3D or SpotLight3D child from block.light_config.
+## Adds the light node to a group named "block_{group}" for day cycle discovery.
+static func _build_light(root: Node3D, block: Block) -> void:
+	var config: Dictionary = block.light_config
+	var light_type: String = config.get("type", "omni")
+	var light: Light3D
+
+	if light_type == "spot":
+		var spot := SpotLight3D.new()
+		spot.spot_angle = config.get("spot_angle", 45.0)
+		light = spot
+	else:
+		light = OmniLight3D.new()
+
+	light.name = "BlockLight"
+
+	# Color — use config color or fall back to material palette color
+	if config.has("color"):
+		light.light_color = config["color"]
+	else:
+		light.light_color = BlockMaterials.get_color(block.material_id)
+
+	light.light_energy = config.get("energy", 1.0)
+
+	if light is OmniLight3D:
+		light.omni_range = config.get("range", 4.0)
+	elif light is SpotLight3D:
+		(light as SpotLight3D).spot_range = config.get("range", 4.0)
+
+	# Shadows off by default (expensive on mobile)
+	light.shadow_enabled = config.get("shadow", false)
+
+	# Position at collision offset (same as mesh center)
+	light.position = block.collision_offset
+
+	# Add to group for day cycle discovery
+	var group_name: String = "block_%s" % config.get("group", "steady")
+	light.add_to_group(group_name)
+
+	# Store base energy as metadata for animation systems
+	light.set_meta("base_energy", light.light_energy)
+
+	root.add_child(light)
 
 
 ## Build collision subtree.
