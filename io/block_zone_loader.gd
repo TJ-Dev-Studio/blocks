@@ -51,7 +51,7 @@ func unregister_zone(zone_name: String) -> void:
 ## Check player position and load/unload zones as needed.
 ## Call from _process() or at regular intervals.
 func update(player_pos: Vector3) -> void:
-	if not _factory:
+	if _factory == null or not is_instance_valid(_factory):
 		return
 
 	var now := Time.get_ticks_msec() / 1000.0

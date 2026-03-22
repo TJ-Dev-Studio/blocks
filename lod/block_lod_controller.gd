@@ -109,6 +109,9 @@ func _compute_target_lod(block_pos: Vector3, camera_pos: Vector3) -> int:
 
 ## Check if a block should participate in LOD.
 func _is_lod_eligible(block: Block) -> bool:
+	# GLB/scene mesh blocks can't be subdivided into primitives — skip them.
+	if block.mesh_type != 0:
+		return false
 	for tag in LOD_TAGS:
 		if tag in block.tags:
 			return true
@@ -142,7 +145,13 @@ func _process_pending_ops(world_root: Node3D) -> void:
 
 
 ## Subdivide a block one level toward the target, building new child nodes.
-func _subdivide_toward(block: Block, target_lod: int, world_root: Node3D) -> void:
+## Maximum recursion depth for subdivision to prevent memory explosion.
+const MAX_SUBDIVIDE_DEPTH := 8
+
+func _subdivide_toward(block: Block, target_lod: int, world_root: Node3D, depth: int = 0) -> void:
+	if depth >= MAX_SUBDIVIDE_DEPTH:
+		push_warning("[LOD] Subdivision depth limit reached for block %s" % block.block_id)
+		return
 	var children := _registry.subdivide_block(block.block_id)
 	if children.is_empty():
 		return
@@ -159,7 +168,7 @@ func _subdivide_toward(block: Block, target_lod: int, world_root: Node3D) -> voi
 
 		# Recurse if still below target
 		if child.lod_level < target_lod and child.can_subdivide():
-			_subdivide_toward(child, target_lod, world_root)
+			_subdivide_toward(child, target_lod, world_root, depth + 1)
 
 
 ## Merge a block with its siblings toward the target LOD level.

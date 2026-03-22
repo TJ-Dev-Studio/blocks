@@ -275,7 +275,8 @@ static func _build_scene_visual(root: Node3D, block: Block) -> void:
 		instance.name = "SceneVisual"
 		root.add_child(instance)
 	else:
-		push_warning("[BlockBuilder] Failed to load scene: %s" % block.scene_path)
+		push_warning("[BlockBuilder] Missing scene: %s — showing placeholder" % block.scene_path)
+		_build_placeholder(root, block)
 
 
 ## GLB PackedScene cache — keyed by path, cleared on zone unload.
@@ -296,7 +297,8 @@ static func _build_glb_visual(root: Node3D, block: Block) -> void:
 	else:
 		scene = load(block.scene_path) as PackedScene
 		if scene == null:
-			push_warning("[BlockBuilder] Failed to load GLB: %s" % block.scene_path)
+			push_warning("[BlockBuilder] Missing GLB: %s — showing placeholder" % block.scene_path)
+			_build_placeholder(root, block)
 			return
 		_glb_cache[block.scene_path] = scene
 
@@ -482,3 +484,23 @@ static func _add_tri(st: SurfaceTool, a: Vector3, b: Vector3, c: Vector3, n: Vec
 	st.add_vertex(b)
 	st.set_normal(n)
 	st.add_vertex(c)
+
+
+## Build a bright magenta placeholder box for missing/broken assets.
+## Like a browser's broken-image icon — shows something went wrong without crashing.
+static func _build_placeholder(root: Node3D, block: Block) -> void:
+	var mi := MeshInstance3D.new()
+	mi.name = "Placeholder"
+	var box := BoxMesh.new()
+	var sz: Vector3 = block.collision_size if block.collision_size.length() > 0.01 else Vector3(0.5, 0.5, 0.5)
+	box.size = sz
+	mi.mesh = box
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 0.0, 1.0, 0.7)  # Bright magenta
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.0, 1.0)
+	mat.emission_energy_multiplier = 2.0
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mi.material_override = mat
+	root.add_child(mi)
