@@ -21,6 +21,12 @@ const LOD_TIERS := [
 ## Minimum time between full LOD scans (seconds).
 const LOD_SCAN_INTERVAL := 1.0
 
+## Minimum camera XZ movement (meters) required to trigger a new scan.
+## If the camera hasn't moved this far since the last scan, skip it.
+## This eliminates the 1-second stutter when the player is standing still
+## or moving slowly (most common while walking).
+const LOD_MIN_MOVE_SQ := 4.0  # 2m threshold (squared for cheap comparison)
+
 ## Maximum BlockBuilder.build() calls per frame (the actual expensive work).
 ## 2 builds ≈ 2-4ms, keeps frame time contribution under 5ms.
 const MAX_BUILDS_PER_FRAME := 2
@@ -33,14 +39,26 @@ var forced_max_lod: PackedStringArray = PackedStringArray()
 
 var _registry: BlockRegistry = null
 var _last_scan_time: float = 0.0
+var _last_scan_pos: Vector3 = Vector3(1e10, 0.0, 1e10)  # Far away to force first scan
 var _pending_ops: Array = []  # [{block_id, target_lod}]
 var _world_root: Node3D = null
 var _builds_this_frame: int = 0
+
+## Cached list of LOD-eligible blocks, rebuilt on demand.
+## Avoids iterating all blocks (potentially thousands) every scan.
+var _lod_eligible_ids: PackedStringArray = PackedStringArray()
+var _lod_cache_dirty: bool = true
 
 
 ## Initialize with a registry reference.
 func init(registry: BlockRegistry) -> void:
 	_registry = registry
+	_lod_cache_dirty = true
+
+
+## Mark the eligible cache as dirty (call when blocks are registered/unregistered).
+func invalidate_lod_cache() -> void:
+	_lod_cache_dirty = true
 
 
 ## Main tick — called every frame from BlocksFactory.update_lod().
@@ -55,8 +73,23 @@ func update(camera_pos: Vector3, world_root: Node3D) -> void:
 	# --- Periodic scan: discover which blocks need LOD changes ---
 	var now := Time.get_ticks_msec() / 1000.0
 	if now - _last_scan_time >= LOD_SCAN_INTERVAL:
-		_last_scan_time = now
-		_scan_blocks(camera_pos)
+		# Skip the scan if the camera hasn't moved significantly since last scan.
+		# This avoids the 1-second GDScript loop spike when the player is walking
+		# or standing still — LOD tiers only change when the player moves 30-60m+.
+		var dx := camera_pos.x - _last_scan_pos.x
+		var dz := camera_pos.z - _last_scan_pos.z
+		var moved_sq := dx * dx + dz * dz
+		if moved_sq >= LOD_MIN_MOVE_SQ or _lod_cache_dirty:
+			_last_scan_time = now
+			_last_scan_pos = camera_pos
+			# Rebuild the eligible cache if blocks were added/removed since last scan
+			if _lod_cache_dirty:
+				_rebuild_lod_cache()
+			_scan_blocks(camera_pos)
+		else:
+			# Reset timer so we check again next interval — don't let timer drift
+			# past multiple intervals without ever scanning.
+			_last_scan_time = now
 
 	# --- Per-frame drain: execute 1-2 pending ops ---
 	_drain_pending_ops()
@@ -83,24 +116,38 @@ func unforce_max_lod(block_id: String) -> void:
 # Internal
 # =========================================================================
 
-## Scan all active blocks for LOD changes and queue operations.
+## Rebuild the list of LOD-eligible block IDs from the registry.
+## Called once after world load and whenever blocks are added/removed.
+## Amortizes the per-block tag check so _scan_blocks() only sees eligible blocks.
+func _rebuild_lod_cache() -> void:
+	_lod_eligible_ids.clear()
+	_lod_cache_dirty = false
+	if not _registry:
+		return
+	for block: Block in _registry.get_active_blocks():
+		if _is_lod_eligible(block):
+			_lod_eligible_ids.append(block.block_id)
+
+
+## Scan LOD-eligible blocks for LOD changes and queue operations.
+## Uses cached eligible IDs instead of all active blocks — O(eligible) not O(total).
 func _scan_blocks(camera_pos: Vector3) -> void:
-	var active_blocks := _registry.get_active_blocks()
 	_pending_ops.clear()
 
-	for block in active_blocks:
-		if not _is_lod_eligible(block):
+	for block_id: String in _lod_eligible_ids:
+		var block := _registry.get_block(block_id)
+		if block == null or not block.active:
 			continue
 
 		# Check forced max LOD
-		if block.block_id in forced_max_lod:
+		if block_id in forced_max_lod:
 			if block.lod_level < 3 and block.can_subdivide():
-				_pending_ops.append({"block_id": block.block_id, "target_lod": 3})
+				_pending_ops.append({"block_id": block_id, "target_lod": 3})
 			continue
 
 		var target := _compute_target_lod(block.position, camera_pos)
 		if block.lod_level != target:
-			_pending_ops.append({"block_id": block.block_id, "target_lod": target})
+			_pending_ops.append({"block_id": block_id, "target_lod": target})
 
 
 ## Drain pending ops with a per-frame build budget.
