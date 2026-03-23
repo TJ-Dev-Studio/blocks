@@ -18,11 +18,12 @@ const LOD_TIERS := [
 ]
 # Beyond 120m -> lod_level 0 (implicit)
 
-## Minimum time between LOD updates (seconds).
-const LOD_UPDATE_INTERVAL := 0.5
+## Minimum time between full LOD scans (seconds).
+const LOD_SCAN_INTERVAL := 1.0
 
-## Maximum LOD operations (subdivide or merge) per update.
-const MAX_LOD_OPS_PER_UPDATE := 8
+## Maximum BlockBuilder.build() calls per frame (the actual expensive work).
+## 2 builds ≈ 2-4ms, keeps frame time contribution under 5ms.
+const MAX_BUILDS_PER_FRAME := 2
 
 ## Tags that mark blocks as LOD-eligible (only these participate in LOD).
 const LOD_TAGS := ["lod", "forest", "tree"]
@@ -31,8 +32,10 @@ const LOD_TAGS := ["lod", "forest", "tree"]
 var forced_max_lod: PackedStringArray = PackedStringArray()
 
 var _registry: BlockRegistry = null
-var _last_update_time: float = 0.0
+var _last_scan_time: float = 0.0
 var _pending_ops: Array = []  # [{block_id, target_lod}]
+var _world_root: Node3D = null
+var _builds_this_frame: int = 0
 
 
 ## Initialize with a registry reference.
@@ -40,37 +43,23 @@ func init(registry: BlockRegistry) -> void:
 	_registry = registry
 
 
-## Main tick. Checks distances, queues LOD operations, processes budget.
-## Call from BlocksFactory.update_lod().
+## Main tick — called every frame from BlocksFactory.update_lod().
+## Scans for LOD changes periodically, then drains pending ops 1-2 per frame.
 func update(camera_pos: Vector3, world_root: Node3D) -> void:
 	if not _registry:
 		return
 
+	_world_root = world_root
+	_builds_this_frame = 0
+
+	# --- Periodic scan: discover which blocks need LOD changes ---
 	var now := Time.get_ticks_msec() / 1000.0
-	if now - _last_update_time < LOD_UPDATE_INTERVAL:
-		return
-	_last_update_time = now
+	if now - _last_scan_time >= LOD_SCAN_INTERVAL:
+		_last_scan_time = now
+		_scan_blocks(camera_pos)
 
-	# Find all LOD-eligible blocks
-	var active_blocks := _registry.get_active_blocks()
-	_pending_ops.clear()
-
-	for block in active_blocks:
-		if not _is_lod_eligible(block):
-			continue
-
-		# Check forced max LOD
-		if block.block_id in forced_max_lod:
-			if block.lod_level < 3 and block.can_subdivide():
-				_pending_ops.append({"block_id": block.block_id, "target_lod": 3})
-			continue
-
-		var target := _compute_target_lod(block.position, camera_pos)
-		if block.lod_level != target:
-			_pending_ops.append({"block_id": block.block_id, "target_lod": target})
-
-	# Process within budget
-	_process_pending_ops(world_root)
+	# --- Per-frame drain: execute 1-2 pending ops ---
+	_drain_pending_ops()
 
 
 ## Force a block to always render at max LOD (e.g. Mother Tree).
@@ -93,6 +82,57 @@ func unforce_max_lod(block_id: String) -> void:
 # =========================================================================
 # Internal
 # =========================================================================
+
+## Scan all active blocks for LOD changes and queue operations.
+func _scan_blocks(camera_pos: Vector3) -> void:
+	var active_blocks := _registry.get_active_blocks()
+	_pending_ops.clear()
+
+	for block in active_blocks:
+		if not _is_lod_eligible(block):
+			continue
+
+		# Check forced max LOD
+		if block.block_id in forced_max_lod:
+			if block.lod_level < 3 and block.can_subdivide():
+				_pending_ops.append({"block_id": block.block_id, "target_lod": 3})
+			continue
+
+		var target := _compute_target_lod(block.position, camera_pos)
+		if block.lod_level != target:
+			_pending_ops.append({"block_id": block.block_id, "target_lod": target})
+
+
+## Drain pending ops with a per-frame build budget.
+func _drain_pending_ops() -> void:
+	while not _pending_ops.is_empty() and _builds_this_frame < MAX_BUILDS_PER_FRAME:
+		var op: Dictionary = _pending_ops[0]
+		_pending_ops.remove_at(0)
+
+		var block_id: String = op["block_id"]
+		var target_lod: int = op["target_lod"]
+		var block := _registry.get_block(block_id)
+
+		if block == null or not block.active:
+			continue
+
+		if block.lod_level < target_lod:
+			var builds_before := _builds_this_frame
+			_subdivide_one_level(block)
+			# Only re-queue if progress was made (builds_this_frame increased).
+			# If no progress: block can't subdivide further — don't re-queue or
+			# _drain_pending_ops() infinite-loops (block stays at same lod, never exits).
+			if block.lod_level < target_lod and _builds_this_frame > builds_before:
+				_pending_ops.append({"block_id": block.block_id, "target_lod": target_lod})
+
+		elif block.lod_level > target_lod:
+			var builds_before_merge := _builds_this_frame
+			_merge_one_level(block)
+			# Only re-queue if merge made progress (same infinite-loop guard).
+			# Note: after merge, the original block may no longer be active — skip.
+			if block.active and block.lod_level > target_lod and _builds_this_frame > builds_before_merge:
+				_pending_ops.append({"block_id": block.block_id, "target_lod": target_lod})
+
 
 ## Determine target LOD level based on XZ distance from camera.
 func _compute_target_lod(block_pos: Vector3, camera_pos: Vector3) -> int:
@@ -118,40 +158,11 @@ func _is_lod_eligible(block: Block) -> bool:
 	return false
 
 
-## Execute up to MAX_LOD_OPS_PER_UPDATE operations.
-func _process_pending_ops(world_root: Node3D) -> void:
-	var ops_done := 0
-
-	for op: Dictionary in _pending_ops:
-		if ops_done >= MAX_LOD_OPS_PER_UPDATE:
-			break
-
-		var block_id: String = op["block_id"]
-		var target_lod: int = op["target_lod"]
-		var block := _registry.get_block(block_id)
-
-		if block == null or not block.active:
-			continue
-
-		if block.lod_level < target_lod:
-			# Need more detail — subdivide
-			_subdivide_toward(block, target_lod, world_root)
-			ops_done += 1
-
-		elif block.lod_level > target_lod:
-			# Need less detail — merge toward parent
-			_merge_toward(block, target_lod, world_root)
-			ops_done += 1
-
-
-## Subdivide a block one level toward the target, building new child nodes.
-## Maximum recursion depth for subdivision to prevent memory explosion.
-const MAX_SUBDIVIDE_DEPTH := 8
-
-func _subdivide_toward(block: Block, target_lod: int, world_root: Node3D, depth: int = 0) -> void:
-	if depth >= MAX_SUBDIVIDE_DEPTH:
-		push_warning("[LOD] Subdivision depth limit reached for block %s" % block.block_id)
+## Subdivide a block ONE level (not recursive). Increments _builds_this_frame.
+func _subdivide_one_level(block: Block) -> void:
+	if _builds_this_frame >= MAX_BUILDS_PER_FRAME:
 		return
+
 	var children := _registry.subdivide_block(block.block_id)
 	if children.is_empty():
 		return
@@ -161,18 +172,25 @@ func _subdivide_toward(block: Block, target_lod: int, world_root: Node3D, depth:
 		block.node.queue_free()
 		block.node = null
 
-	# Build child nodes
+	# Build child nodes (each counts toward the frame budget)
 	for child in children:
+		if _builds_this_frame >= MAX_BUILDS_PER_FRAME:
+			# Budget exhausted — remaining children will be built on next frame
+			# Re-queue them as pending ops
+			if child.active and child.collision_shape != BlockCategories.SHAPE_NONE:
+				_pending_ops.append({"block_id": child.block_id, "target_lod": child.lod_level})
+			continue
+
 		if child.active and child.collision_shape != BlockCategories.SHAPE_NONE:
-			BlockBuilder.build(child, world_root)
-
-		# Recurse if still below target
-		if child.lod_level < target_lod and child.can_subdivide():
-			_subdivide_toward(child, target_lod, world_root, depth + 1)
+			BlockBuilder.build(child, _world_root)
+			_builds_this_frame += 1
 
 
-## Merge a block with its siblings toward the target LOD level.
-func _merge_toward(block: Block, target_lod: int, world_root: Node3D) -> void:
+## Merge a block with its siblings ONE level. Increments _builds_this_frame.
+func _merge_one_level(block: Block) -> void:
+	if _builds_this_frame >= MAX_BUILDS_PER_FRAME:
+		return
+
 	if block.parent_lod_id.is_empty():
 		return
 
@@ -203,8 +221,5 @@ func _merge_toward(block: Block, target_lod: int, world_root: Node3D) -> void:
 
 	# Build merged node
 	if merged.active and merged.collision_shape != BlockCategories.SHAPE_NONE:
-		BlockBuilder.build(merged, world_root)
-
-	# Continue merging if still above target
-	if merged.lod_level > target_lod:
-		_merge_toward(merged, target_lod, world_root)
+		BlockBuilder.build(merged, _world_root)
+		_builds_this_frame += 1

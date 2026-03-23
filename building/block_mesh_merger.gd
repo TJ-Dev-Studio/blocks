@@ -46,8 +46,6 @@ static func merge(asm_root: Node3D, blocks: Array) -> void:
 		max_z = maxf(max_z, p.z)
 	var extent := maxf(max_x - min_x, max_z - min_z)
 	if extent > MAX_MERGE_EXTENT:
-		print("[BlockMeshMerger] Skip merge for '%s' (extent=%.0fm > %.0fm limit)" % [
-			asm_root.name, extent, MAX_MERGE_EXTENT])
 		return
 
 	# Identify blocks with neurons (skip merging — they need per-block visual updates)
