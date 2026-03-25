@@ -218,7 +218,7 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 		_apply_multi_material(mi, block)
 		if not block.cast_shadow:
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.visibility_range_end = 100.0
+		mi.visibility_range_end = _compute_vis_range(block)
 		mi.visibility_range_end_margin = 10.0
 		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 		root.add_child(mi)
@@ -259,14 +259,26 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 
 	# Distance culling for un-merged blocks (large assemblies like terrain/forest).
 	# Merged assemblies (<40m extent) use frustum culling only — no vis range needed.
-	# 100m keeps terrain ground visible across most of the 200m world while still
-	# culling blocks at the far edges. The mesh merge system (3350→264 draws)
-	# handles the main draw call reduction; this is supplemental GPU savings.
-	mi.visibility_range_end = 100.0
+	# Volume-based tiers: small decorations cull at 30m, large terrain at 100m.
+	mi.visibility_range_end = _compute_vis_range(block)
 	mi.visibility_range_end_margin = 10.0
 	mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 
 	root.add_child(mi)
+
+
+## Compute visibility_range_end based on block collision volume.
+## Small decorative blocks don't need to render at 100m.
+static func _compute_vis_range(block: Block) -> float:
+	var s: Vector3 = block.collision_size
+	var volume := s.x * s.y * s.z
+	if volume < 0.5:
+		return 30.0
+	elif volume < 2.0:
+		return 50.0
+	elif volume < 10.0:
+		return 75.0
+	return 100.0
 
 
 ## Build custom scene visual.

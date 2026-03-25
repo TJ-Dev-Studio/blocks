@@ -3,8 +3,9 @@ class_name BlockMeshMerger
 ##
 ## Reduces draw calls from N (one per block) to ~M (one per unique material).
 ## Collision nodes are untouched. Blocks with neurons are skipped (need individual updates).
-## Assemblies spanning > MAX_MERGE_EXTENT meters are skipped — their merged mesh AABB
-## would be too large for visibility_range culling to work correctly.
+## Small assemblies (≤MAX_MERGE_EXTENT) merge all blocks together.
+## Large assemblies are split into CHUNK_SIZE spatial buckets and merged per-chunk,
+## keeping each chunk's AABB small enough for visibility_range culling.
 ##
 ## Face culling: before merging, detects axis-aligned BoxMesh pairs that share a
 ## touching face and removes the internal (invisible) triangles from both sides.
@@ -29,11 +30,22 @@ const MIN_FACE_COVERAGE := 0.75
 ## Dot product threshold for matching a triangle normal to a blocked direction.
 const NORMAL_DOT_THRESHOLD := 0.9
 
+## Spatial chunk size (meters) for merging large assemblies.
+## Each chunk's merged AABB stays small enough for visibility_range culling.
+const CHUNK_SIZE := 16.0
+
+## Visibility range for chunked merged meshes. Safe because chunk AABBs are ≤16m.
+const CHUNK_VIS_RANGE := 80.0
+
 
 ## Merge same-material meshes under an assembly root node.
 ## blocks: Array of Block resources belonging to this assembly.
+## Small assemblies (extent <= MAX_MERGE_EXTENT) merge all blocks together.
+## Large assemblies are split into CHUNK_SIZE spatial buckets and merged per-chunk,
+## enabling terrain, perimeter, and forest ring assemblies to benefit from merging
+## while keeping each chunk's AABB small enough for visibility_range culling.
 static func merge(asm_root: Node3D, blocks: Array) -> void:
-	# Check spatial extent — skip large assemblies (terrain, perimeter, forest rings)
+	# Compute spatial extent
 	var min_x := INF
 	var max_x := -INF
 	var min_z := INF
@@ -45,8 +57,43 @@ static func merge(asm_root: Node3D, blocks: Array) -> void:
 		min_z = minf(min_z, p.z)
 		max_z = maxf(max_z, p.z)
 	var extent := maxf(max_x - min_x, max_z - min_z)
-	if extent > MAX_MERGE_EXTENT:
+
+	if extent <= MAX_MERGE_EXTENT:
+		# Small assembly — merge all blocks into one group (existing behavior)
+		_merge_group(asm_root, blocks, "", extent)
 		return
+
+	# Large assembly — bucket blocks into spatial chunks and merge each independently
+	var chunks := _bucket_by_chunk(blocks, CHUNK_SIZE)
+	var chunks_merged := 0
+	for chunk_key: String in chunks:
+		var chunk_blocks: Array = chunks[chunk_key]
+		if chunk_blocks.size() >= MIN_MERGE_BLOCKS:
+			chunks_merged += _merge_group(asm_root, chunk_blocks, chunk_key, CHUNK_SIZE)
+	if chunks_merged > 0:
+		print("[BlockMeshMerger] Chunked merge: %d chunks merged in '%s' (extent=%.0fm, %d chunks total)" % [
+			chunks_merged, asm_root.name, extent, chunks.size()])
+
+
+## Bucket blocks into spatial chunks by their XZ position on a grid.
+## Returns Dictionary of "cx_cz" -> Array[Block].
+static func _bucket_by_chunk(blocks: Array, chunk_size: float) -> Dictionary:
+	var chunks: Dictionary = {}
+	for block in blocks:
+		var p: Vector3 = block.get_meta("local_position", block.position)
+		var cx := int(floorf(p.x / chunk_size))
+		var cz := int(floorf(p.z / chunk_size))
+		var key := "%d_%d" % [cx, cz]
+		if not chunks.has(key):
+			chunks[key] = []
+		chunks[key].append(block)
+	return chunks
+
+
+## Core merge logic for a group of blocks (full assembly or single chunk).
+## Returns 1 if any meshes were merged, 0 otherwise.
+static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, extent: float) -> int:
+	var is_chunk := not chunk_id.is_empty()
 
 	# Identify blocks with neurons (skip merging — they need per-block visual updates)
 	var neuron_ids: Dictionary = {}
@@ -95,7 +142,7 @@ static func merge(asm_root: Node3D, blocks: Array) -> void:
 		mesh_count += 1
 
 	if mesh_count < MIN_MERGE_BLOCKS:
-		return
+		return 0
 
 	var merged_count := 0
 	var removed_count := 0
@@ -107,7 +154,7 @@ static func merge(asm_root: Node3D, blocks: Array) -> void:
 		if meshes.size() < 2:
 			continue  # not worth merging a single mesh
 
-		# Phase 1: Detect shared internal faces between touching BoxMesh pairs
+		# Detect shared internal faces between touching BoxMesh pairs
 		var culled_faces: Dictionary = _find_culled_faces(meshes)
 
 		var st := SurfaceTool.new()
@@ -116,7 +163,7 @@ static func merge(asm_root: Node3D, blocks: Array) -> void:
 		for i: int in range(meshes.size()):
 			var entry: Dictionary = meshes[i]
 			if culled_faces.has(i):
-				# Phase 2: Selective copy — skip triangles facing blocked directions
+				# Selective copy — skip triangles facing blocked directions
 				total_faces_culled += _append_with_culling(
 					st, entry["mesh"], entry["transform"], culled_faces[i])
 			else:
@@ -130,13 +177,19 @@ static func merge(asm_root: Node3D, blocks: Array) -> void:
 		var merged_mesh: ArrayMesh = st.commit()
 
 		var merged_inst := MeshInstance3D.new()
-		merged_inst.name = "Merged_%d" % merged_count
+		var name_suffix := ("_c" + chunk_id) if is_chunk else ""
+		merged_inst.name = "Merged_%d%s" % [merged_count, name_suffix]
 		merged_inst.mesh = merged_mesh
 		merged_inst.material_override = group["material"]
 		merged_inst.cast_shadow = group["shadow"] as GeometryInstance3D.ShadowCastingSetting
-		# No visibility_range on merged meshes — frustum culling handles it.
-		# Per-block visibility_range only works when block AABBs are small;
-		# merged AABBs span the whole assembly and would cull incorrectly.
+
+		# Chunked merges get visibility_range — small AABB makes distance culling safe.
+		# Non-chunked merges (small assemblies) rely on frustum culling only.
+		if is_chunk:
+			merged_inst.visibility_range_end = CHUNK_VIS_RANGE
+			merged_inst.visibility_range_end_margin = 10.0
+			merged_inst.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+
 		asm_root.add_child(merged_inst)
 		merged_count += 1
 
@@ -145,12 +198,14 @@ static func merge(asm_root: Node3D, blocks: Array) -> void:
 			(entry["node"] as Node3D).queue_free()
 			removed_count += 1
 
-	if merged_count > 0:
+	if merged_count > 0 and not is_chunk:
 		var cull_info := ""
 		if total_faces_culled > 0:
 			cull_info = ", %d internal faces culled" % total_faces_culled
 		print("[BlockMeshMerger] Mesh merge: %d meshes → %d draws in '%s' (extent=%.0fm%s)" % [
 			removed_count, merged_count, asm_root.name, extent, cull_info])
+
+	return 1 if merged_count > 0 else 0
 
 
 ## Detect shared internal faces between touching axis-aligned BoxMesh pairs.
