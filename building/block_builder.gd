@@ -268,17 +268,18 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 
 
 ## Compute visibility_range_end based on block collision volume.
-## Small decorative blocks don't need to render at 100m.
+## Aggressive tiers — gameplay happens within ~40m, no need to render
+## small props at 100m. Large terrain/structures stay visible further out.
 static func _compute_vis_range(block: Block) -> float:
 	var s: Vector3 = block.collision_size
 	var volume := s.x * s.y * s.z
 	if volume < 0.5:
-		return 30.0
+		return 20.0   # tiny decorations, trim
 	elif volume < 2.0:
-		return 50.0
+		return 35.0   # fence posts, small props
 	elif volume < 10.0:
-		return 75.0
-	return 100.0
+		return 60.0   # walls, pillars
+	return 90.0       # terrain, large structures
 
 
 ## Build custom scene visual.

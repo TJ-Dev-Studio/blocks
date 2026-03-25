@@ -12,7 +12,8 @@ class_name BlockMeshMerger
 ## This saves GPU fill rate on dense structures (e.g. 84-block store in FrogTown).
 
 ## Minimum block count to trigger mesh merging in an assembly.
-const MIN_MERGE_BLOCKS := 4
+## 2 is the minimum useful — merging 2 meshes into 1 halves draw calls.
+const MIN_MERGE_BLOCKS := 2
 
 ## Maximum spatial extent (meters) for an assembly to be merge-eligible.
 ## Assemblies spanning more than this have their merged mesh AABB center far from
@@ -193,9 +194,11 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		asm_root.add_child(merged_inst)
 		merged_count += 1
 
-		# Remove original mesh nodes (block root + collision stay intact)
+		# Remove original mesh nodes immediately (not queue_free) so that
+		# post-merge cleanup can detect empty block roots via get_child_count()==0.
+		# Safe because we're done reading from meshes and the merged mesh is committed.
 		for entry in meshes:
-			(entry["node"] as Node3D).queue_free()
+			(entry["node"] as Node3D).free()
 			removed_count += 1
 
 	if merged_count > 0 and not is_chunk:
