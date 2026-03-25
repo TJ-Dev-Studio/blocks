@@ -74,9 +74,11 @@ static func _build_light(root: Node3D, block: Block) -> void:
 		light.light_color = BlockMaterials.get_color(block.material_id)
 
 	light.light_energy = config.get("energy", 1.0)
+	light.light_indirect_energy = config.get("indirect_energy", 1.0)
 
 	if light is OmniLight3D:
 		light.omni_range = config.get("range", 4.0)
+		light.omni_attenuation = config.get("attenuation", 1.0)
 	elif light is SpotLight3D:
 		(light as SpotLight3D).spot_range = config.get("range", 4.0)
 
