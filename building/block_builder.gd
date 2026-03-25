@@ -219,7 +219,7 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 		if not block.cast_shadow:
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		mi.visibility_range_end = _compute_vis_range(block)
-		mi.visibility_range_end_margin = 10.0
+		mi.visibility_range_end_margin = 2.0
 		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 		root.add_child(mi)
 		return
@@ -261,7 +261,7 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 	# Merged assemblies (<40m extent) use frustum culling only — no vis range needed.
 	# Volume-based tiers: small decorations cull at 30m, large terrain at 100m.
 	mi.visibility_range_end = _compute_vis_range(block)
-	mi.visibility_range_end_margin = 10.0
+	mi.visibility_range_end_margin = 2.0
 	mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 
 	root.add_child(mi)

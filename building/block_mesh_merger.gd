@@ -187,7 +187,7 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		# Non-chunked merges (small assemblies) rely on frustum culling only.
 		if is_chunk:
 			merged_inst.visibility_range_end = CHUNK_VIS_RANGE
-			merged_inst.visibility_range_end_margin = 10.0
+			merged_inst.visibility_range_end_margin = 2.0
 			merged_inst.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 
 		asm_root.add_child(merged_inst)
