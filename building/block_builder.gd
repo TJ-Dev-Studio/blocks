@@ -138,13 +138,18 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 		BlockCategories.SHAPE_BOX:
 			var box_mesh := BoxMesh.new()
 			box_mesh.size = dims
+			# Subdivisions give the outline shader more vertices to work with,
+			# producing smoother outlines at corners instead of razor-sharp edges.
+			box_mesh.subdivide_width = 2
+			box_mesh.subdivide_height = 2
+			box_mesh.subdivide_depth = 2
 			mi.mesh = box_mesh
 		BlockCategories.SHAPE_CYLINDER:
 			var cyl := CylinderMesh.new()
 			cyl.top_radius = dims.x
 			cyl.bottom_radius = dims.x
 			cyl.height = dims.y
-			cyl.radial_segments = 8  # 8 is enough for stylized look; saves 33% verts vs 12
+			cyl.radial_segments = 12  # Smoother silhouette for pop-art outlines
 			mi.mesh = cyl
 		BlockCategories.SHAPE_CAPSULE:
 			var cap := CapsuleMesh.new()
@@ -169,7 +174,7 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 			cone.top_radius = 0.0
 			cone.bottom_radius = dims.x
 			cone.height = dims.y
-			cone.radial_segments = 8
+			cone.radial_segments = 12
 			mi.mesh = cone
 		BlockCategories.SHAPE_TORUS:
 			var torus := TorusMesh.new()
@@ -218,9 +223,10 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 		_apply_multi_material(mi, block)
 		if not block.cast_shadow:
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.visibility_range_end = _compute_vis_range(block)
-		mi.visibility_range_end_margin = 2.0
-		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+		if "sky" not in block.tags:
+			mi.visibility_range_end = _compute_vis_range(block)
+			mi.visibility_range_end_margin = 2.0
+			mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 		root.add_child(mi)
 		return
 
@@ -260,9 +266,11 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 	# Distance culling for un-merged blocks (large assemblies like terrain/forest).
 	# Merged assemblies (<40m extent) use frustum culling only — no vis range needed.
 	# Volume-based tiers: small decorations cull at 30m, large terrain at 100m.
-	mi.visibility_range_end = _compute_vis_range(block)
-	mi.visibility_range_end_margin = 2.0
-	mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+	# Exception: "sky" tagged blocks (clouds) render at any distance.
+	if "sky" not in block.tags:
+		mi.visibility_range_end = _compute_vis_range(block)
+		mi.visibility_range_end_margin = 2.0
+		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
 
 	root.add_child(mi)
 
