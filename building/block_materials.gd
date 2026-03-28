@@ -10,6 +10,20 @@ static var _override_cache: Dictionary = {}
 static var _shader: Shader = null
 static var _proc_shader: Shader = null
 
+## Extension points — game-specific overrides registered at startup.
+## palette_override: Dictionary of material_id -> Color. Merged on top of PALETTE.
+static var palette_override: Dictionary = {}
+## roughness_override: Dictionary of material_id -> float. Merged on top of ROUGHNESS.
+static var roughness_override: Dictionary = {}
+## material_post_processor: Callable(material_id: String, mat: Material) -> Material.
+## Called after every material is created, before caching. Use to add next_pass,
+## shader parameters, or replace the material entirely. Return the (possibly modified) material.
+static var material_post_processor: Callable = Callable()
+## shader_param_injector: Callable(material_id: String, smat: ShaderMaterial) -> void.
+## Called after shader parameters are set on opaque ShaderMaterials. Use to inject
+## additional textures or uniforms (e.g. brush strokes, canvas grain).
+static var shader_param_injector: Callable = Callable()
+
 ## Maps material_type string to the int uniform value used in the uber-shader.
 ## 0 = flat (fallback), 1 = bark, 2 = stone, 3 = moss, 4 = water, 5 = wood
 const MATERIAL_TYPE_MAP: Dictionary = {
@@ -162,13 +176,15 @@ static func get_material(material_id: String) -> Material:
 		return _cache[material_id]
 
 	var color: Color
-	if PALETTE.has(material_id):
+	if palette_override.has(material_id):
+		color = palette_override[material_id]
+	elif PALETTE.has(material_id):
 		color = PALETTE[material_id]
 	else:
-		color = PALETTE["default"]
+		color = palette_override.get("default", PALETTE["default"])
 		push_warning("[BlockMaterials] Unknown material '%s', using default" % material_id)
 
-	var rough: float = ROUGHNESS.get(material_id, 0.8)
+	var rough: float = roughness_override.get(material_id, ROUGHNESS.get(material_id, 0.8))
 
 	var mat: Material
 	if color.a < 1.0:
@@ -188,6 +204,8 @@ static func get_material(material_id: String) -> Material:
 			smat.shader = shader
 			smat.set_shader_parameter("albedo_color", color)
 			smat.set_shader_parameter("roughness", rough)
+			if shader_param_injector.is_valid():
+				shader_param_injector.call(material_id, smat)
 			mat = smat
 		else:
 			# Shader unavailable — graceful fallback
@@ -195,6 +213,9 @@ static func get_material(material_id: String) -> Material:
 			std.albedo_color = color
 			std.roughness = rough
 			mat = std
+
+	if material_post_processor.is_valid():
+		mat = material_post_processor.call(material_id, mat)
 
 	_cache[material_id] = mat
 	return mat
@@ -218,19 +239,24 @@ static func get_material_from_color(color: Color) -> StandardMaterial3D:
 
 ## Get the Color for a palette material_id directly.
 static func get_color(material_id: String) -> Color:
+	if palette_override.has(material_id):
+		return palette_override[material_id]
 	return PALETTE.get(material_id, PALETTE["default"])
 
 
 ## Check if a material_id exists in the palette.
 static func has_material(material_id: String) -> bool:
-	return PALETTE.has(material_id)
+	return palette_override.has(material_id) or PALETTE.has(material_id)
 
 
-## Get all palette keys.
+## Get all palette keys (base + overrides merged).
 static func get_palette_keys() -> PackedStringArray:
 	var keys := PackedStringArray()
 	for k in PALETTE:
 		keys.append(k)
+	for k in palette_override:
+		if k not in PALETTE:
+			keys.append(k)
 	return keys
 
 
@@ -319,7 +345,7 @@ static func get_procedural_material(material_type: String, palette_key: String) 
 
 	var type_int: int = int(MATERIAL_TYPE_MAP.get(material_type, 0))
 	var color: Color = get_color(palette_key)
-	var rough: float = ROUGHNESS.get(palette_key, 0.8)
+	var rough: float = roughness_override.get(palette_key, ROUGHNESS.get(palette_key, 0.8))
 
 	var mat := ShaderMaterial.new()
 	mat.shader = shader
@@ -327,12 +353,18 @@ static func get_procedural_material(material_type: String, palette_key: String) 
 	mat.set_shader_parameter("albedo_color", color)
 	mat.set_shader_parameter("roughness", rough)
 	mat.set_shader_parameter("tint_color", Color.WHITE)
+	if shader_param_injector.is_valid():
+		shader_param_injector.call(palette_key, mat)
+
+	var final_mat: Material = mat
+	if material_post_processor.is_valid():
+		final_mat = material_post_processor.call(palette_key, mat)
 
 	if _override_cache.size() >= 200:
 		push_warning("[BlockMaterials] Override cache at 200+ entries — consider clearing on zone unload")
 
-	_override_cache[key] = mat
-	return mat
+	_override_cache[key] = final_mat
+	return final_mat
 
 
 ## Clear only the override cache (called from zone unload to evict per-element instances).

@@ -83,8 +83,16 @@ lod/          ← depends on registry/ (BlockRegistry)
 4. Run tests
 
 ### New Material
-1. Add to `PALETTE` dictionary in `building/block_materials.gd`
-2. Use `material_id` key in block JSON
+1. Add to `PALETTE` dictionary in `building/block_materials.gd` (for library defaults)
+2. OR set `BlockMaterials.palette_override["my_mat"] = Color(...)` from your game's style autoload
+3. Use `material_id` key in block JSON
+
+### Game-Specific Style
+The library's visual output is fully customizable via `BlockMaterials` static extension points:
+- `palette_override` / `roughness_override` — Dictionary overrides merged on top of built-in constants
+- `shader_param_injector` — Callable to inject textures/uniforms into every ShaderMaterial
+- `material_post_processor` — Callable to add next_pass (outlines), replace materials, etc.
+Register these in a game autoload that runs before BlocksFactory. See README.md for full example.
 
 ### New Placement Rule
 1. Create `rules/my_rule.gd` extending `BlockPlacementRule`

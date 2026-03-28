@@ -343,6 +343,53 @@ func _process(delta):
     lod.update(camera.global_position, world_root)
 ```
 
+## Style Extension System
+
+The blocks library ships with a generic default palette. Your game registers its own art identity at startup through four static extension points on `BlockMaterials`:
+
+| Extension Point | Type | Purpose |
+|----------------|------|---------|
+| `palette_override` | `Dictionary` (String → Color) | Override or add palette colors |
+| `roughness_override` | `Dictionary` (String → float) | Override or add roughness values |
+| `shader_param_injector` | `Callable(material_id, ShaderMaterial)` | Inject textures/uniforms into every ShaderMaterial |
+| `material_post_processor` | `Callable(material_id, Material) → Material` | Add next_pass, replace material, etc. |
+
+Overrides are checked before the built-in `PALETTE` and `ROUGHNESS` constants. `get_color()`, `has_material()`, and `get_palette_keys()` all respect overrides.
+
+```gdscript
+# Example: register your game's art style in an autoload (runs before BlocksFactory)
+extends Node
+
+func _ready() -> void:
+    # Override palette colors
+    BlockMaterials.palette_override = {
+        "wood": Color(0.35, 0.22, 0.10),
+        "stone": Color(0.42, 0.38, 0.33),
+        "my_custom_mat": Color(0.8, 0.2, 0.5),
+    }
+
+    # Override roughness
+    BlockMaterials.roughness_override = {
+        "wood": 0.88,
+        "stone": 0.90,
+    }
+
+    # Inject brush textures into every shader material
+    var brush_tex = load("res://assets/textures/brush.png")
+    BlockMaterials.shader_param_injector = func(_id: String, smat: ShaderMaterial):
+        smat.set_shader_parameter("brush_texture", brush_tex)
+
+    # Add outline shader as next_pass on all opaque materials
+    var outline_mat = ShaderMaterial.new()
+    outline_mat.shader = load("res://assets/shaders/outline.gdshader")
+    BlockMaterials.material_post_processor = func(_id: String, mat: Material) -> Material:
+        if mat is ShaderMaterial:
+            mat.next_pass = outline_mat
+        return mat
+```
+
+The library stays headless and game-agnostic. Your project owns the visual identity.
+
 ## Tests
 
 **809+ assertions across 8 test suites.**
