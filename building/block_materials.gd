@@ -396,3 +396,6 @@ static func prewarm_procedural_shaders(parent: Node3D) -> void:
 static func clear_cache() -> void:
 	_cache.clear()
 	_override_cache.clear()
+	# Release static shader references so GPU programs can be freed
+	_shader = null
+	_proc_shader = null
