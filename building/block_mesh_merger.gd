@@ -131,9 +131,11 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		if not groups.has(key):
 			groups[key] = {"material": mat, "shadow": shadow_mode, "meshes": []}
 
-		# Transform: block node local transform * mesh local transform
-		# This gives us the mesh position in asm_root-local space
-		var rel_xform: Transform3D = block.node.transform * mesh_inst.transform
+		# Transform: mesh position in asm_root-local space.
+		# Compose the local transform chain from block up to asm_root to handle
+		# blocks nested multiple levels deep (zone → region → structure → assembly → block).
+		var block_rel: Transform3D = _relative_transform(block.node, asm_root)
+		var rel_xform: Transform3D = block_rel * mesh_inst.transform
 		groups[key]["meshes"].append({
 			"mesh": mesh_inst.mesh,
 			"transform": rel_xform,
@@ -418,3 +420,14 @@ static func _append_with_culling(
 		st.add_vertex(tv2)
 
 	return culled_count
+
+
+## Compute the transform of `node` relative to `ancestor` by composing local
+## transforms up the parent chain. Much faster than global_transform in headless.
+static func _relative_transform(node: Node3D, ancestor: Node3D) -> Transform3D:
+	var xform := Transform3D.IDENTITY
+	var current: Node3D = node
+	while current != null and current != ancestor:
+		xform = current.transform * xform
+		current = current.get_parent() as Node3D
+	return xform
