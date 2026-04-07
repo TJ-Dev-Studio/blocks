@@ -131,9 +131,12 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		if not groups.has(key):
 			groups[key] = {"material": mat, "shadow": shadow_mode, "meshes": []}
 
-		# Transform: block node local transform * mesh local transform
-		# This gives us the mesh position in asm_root-local space
-		var rel_xform: Transform3D = block.node.transform * mesh_inst.transform
+		# Transform: block node global transform * mesh local transform, then
+		# convert to asm_root-local space. Using global_transform accounts for
+		# the full parent chain (assembly container, structure container, etc.)
+		# which is critical for zone-level merging where asm_root is the zone
+		# node, not the block's immediate parent.
+		var rel_xform: Transform3D = asm_root.global_transform.affine_inverse() * block.node.global_transform * mesh_inst.transform
 		groups[key]["meshes"].append({
 			"mesh": mesh_inst.mesh,
 			"transform": rel_xform,
