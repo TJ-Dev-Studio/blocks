@@ -3,7 +3,30 @@ class_name BlockVisuals
 ##
 ## Modifies MeshInstance3D materials on already-built block nodes.
 ## Use for: power-on glow, damage flashes, highlight selection, etc.
-## Always duplicates materials to avoid shared-cache side effects.
+## Clones material once per block, then modifies in-place on subsequent calls.
+
+## Metadata key used to track whether a MeshInstance3D's material_override
+## has already been cloned for per-instance modification.
+const _OWNED_META := &"bv_owned"
+
+
+## Get or create a per-instance StandardMaterial3D for a block's mesh.
+## First call clones the shared material; subsequent calls return the
+## existing clone for in-place modification (no allocation).
+static func _ensure_owned_material(mesh: MeshInstance3D, block: Block) -> StandardMaterial3D:
+	if mesh.has_meta(_OWNED_META) and mesh.material_override is StandardMaterial3D:
+		return mesh.material_override as StandardMaterial3D
+	var mat: StandardMaterial3D
+	if mesh.material_override is StandardMaterial3D:
+		mat = mesh.material_override.duplicate() as StandardMaterial3D
+	else:
+		mat = StandardMaterial3D.new()
+		mat.albedo_color = BlockMaterials.PALETTE.get(block.material_id,
+			BlockMaterials.PALETTE["default"])
+	mesh.material_override = mat
+	mesh.set_meta(_OWNED_META, true)
+	return mat
+
 
 ## Set emission color and intensity on a block's mesh.
 ## Returns true if the mesh was found and modified.
@@ -14,19 +37,10 @@ static func set_emission(block: Block, color: Color, energy: float = 1.0) -> boo
 	if mesh == null:
 		return false
 
-	# Clone material to avoid shared-material side effects
-	var mat: StandardMaterial3D
-	if mesh.material_override is StandardMaterial3D:
-		mat = mesh.material_override.duplicate() as StandardMaterial3D
-	else:
-		mat = StandardMaterial3D.new()
-		mat.albedo_color = BlockMaterials.PALETTE.get(block.material_id,
-			BlockMaterials.PALETTE["default"])
-
+	var mat: StandardMaterial3D = _ensure_owned_material(mesh, block)
 	mat.emission_enabled = energy > 0.0
 	mat.emission = color
 	mat.emission_energy_multiplier = energy
-	mesh.material_override = mat
 	return true
 
 
@@ -43,14 +57,8 @@ static func set_color(block: Block, color: Color) -> bool:
 	if mesh == null:
 		return false
 
-	var mat: StandardMaterial3D
-	if mesh.material_override is StandardMaterial3D:
-		mat = mesh.material_override.duplicate() as StandardMaterial3D
-	else:
-		mat = StandardMaterial3D.new()
-
+	var mat: StandardMaterial3D = _ensure_owned_material(mesh, block)
 	mat.albedo_color = color
-	mesh.material_override = mat
 	return true
 
 
