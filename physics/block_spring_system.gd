@@ -26,6 +26,11 @@ var _active_ids: Array[String] = []
 ## Reference to the block registry for connection lookups.
 var _registry = null  # BlockRegistry (untyped to avoid cyclic dep)
 
+## Optional callback invoked on every impulse: func(block_id, impulse, from_id).
+## Follows the same Callable extension pattern as BlockMaterials.shader_param_injector.
+## Set by the game layer (e.g. BlocksFactory) to wire audio or VFX on impact.
+var on_impulse_applied: Callable = Callable()
+
 
 # =========================================================================
 # Registration
@@ -69,6 +74,10 @@ func apply_impulse(block_id: String, impulse: Vector3, from_id: String) -> void:
 
 	# Apply velocity change
 	spring.apply_impulse(impulse, from_id)
+
+	# Notify external listeners (audio, VFX)
+	if on_impulse_applied.is_valid():
+		on_impulse_applied.call(block_id, impulse, from_id)
 
 	# Schedule propagation to neighbors
 	if _registry:

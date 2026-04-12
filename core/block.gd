@@ -115,6 +115,11 @@ extends Resource
 ##        range (float), group (String), shadow (bool), spot_angle (float).
 @export var light_config: Dictionary = {}
 
+## Per-block audio material override. When non-empty, impact sounds use this
+## instead of the visual material_id. Parsed from "audio.material" in JSON.
+## Valid values: "wood", "metal", "stone", "glass", "organic" (or any palette key).
+@export var audio_material: String = ""
+
 # =========================================================================
 # Placement (instance-specific)
 # =========================================================================
@@ -309,6 +314,7 @@ func duplicate_block() -> Block:
 	b.material_type_id = material_type_id
 	b.materials_list = materials_list.duplicate()
 	b.light_config = light_config.duplicate()
+	b.audio_material = audio_material
 	return b
 
 
@@ -510,6 +516,7 @@ func merge_with(other: Block) -> Block:
 	merged.material_params = material_params.duplicate()
 	merged.material_type_id = material_type_id
 	merged.materials_list = materials_list.duplicate()
+	merged.audio_material = audio_material
 	merged.scale_factor = scale_factor
 	merged.min_size = min_size
 	merged.dna = dna.duplicate(true)
@@ -602,6 +609,7 @@ func _make_subdivision_child(index: int, axes: Array[int]) -> Block:
 	child.color_tint = color_tint
 	child.material_params = material_params.duplicate()
 	child.material_type_id = material_type_id
+	child.audio_material = audio_material
 	child.scale_factor = scale_factor
 	child.creator = creator
 	child.version = version

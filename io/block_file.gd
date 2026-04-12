@@ -161,6 +161,11 @@ static func file_to_block(data: Dictionary) -> Block:
 	if not materials_arr.is_empty():
 		block.materials_list = materials_arr
 
+	# Audio (per-block sound override)
+	var audio_data: Dictionary = data.get("audio", {})
+	if not audio_data.is_empty():
+		block.audio_material = audio_data.get("material", "")
+
 	# Blend (SDF group membership — may be overridden by assembly child def)
 	var blend_data: Dictionary = data.get("blend", {})
 	var blend_group: String = blend_data.get("blend_group", "")
@@ -461,6 +466,9 @@ static func _set_block_dotted(block: Block, section: String, prop: String, value
 			match prop:
 				"min_size": block.min_size = _arr_to_vec3(value)
 				"dna": block.dna = value if value is Dictionary else {}
+		"audio":
+			match prop:
+				"material": block.audio_material = str(value)
 		"light":
 			if block.light_config.is_empty():
 				block.light_config = {}
