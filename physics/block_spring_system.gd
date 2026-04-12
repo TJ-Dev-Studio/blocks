@@ -75,9 +75,10 @@ func apply_impulse(block_id: String, impulse: Vector3, from_id: String) -> void:
 	# Apply velocity change
 	spring.apply_impulse(impulse, from_id)
 
-	# Notify external listeners (audio, VFX)
+	# Notify external listeners (audio, VFX) — deferred to avoid frame timing
+	# hiccups from audio generation during the physics step loop.
 	if on_impulse_applied.is_valid():
-		on_impulse_applied.call(block_id, impulse, from_id)
+		on_impulse_applied.call_deferred(block_id, impulse, from_id)
 
 	# Schedule propagation to neighbors
 	if _registry:
