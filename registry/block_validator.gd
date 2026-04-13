@@ -13,6 +13,7 @@ const MAX_VISUAL_COLLISION_RATIO := 5.0
 const MAX_POSITION_XZ := 500.0
 const MIN_POSITION_Y := -50.0
 const MAX_POSITION_Y := 400.0
+const MIN_CLIMBABLE_HEIGHT := 1.0
 
 
 ## Validate a Block definition. Returns empty array if valid.
@@ -176,6 +177,12 @@ static func _validate_interaction(block: Block, errors: Array[String]) -> void:
 
 	if block.interaction == BlockCategories.INTERACT_TRIGGER and block.trigger_radius <= 0.0:
 		errors.append("TRIGGER interaction requires trigger_radius > 0")
+
+	if block.interaction == BlockCategories.INTERACT_CLIMBABLE:
+		if block.collision_size.y < MIN_CLIMBABLE_HEIGHT:
+			errors.append(
+				"CLIMBABLE interaction requires height >= %.1f, got %.3f"
+				% [MIN_CLIMBABLE_HEIGHT, block.collision_size.y])
 
 
 static func _validate_position(block: Block, errors: Array[String]) -> void:
