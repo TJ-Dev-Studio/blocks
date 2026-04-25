@@ -149,7 +149,7 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 			cyl.top_radius = dims.x
 			cyl.bottom_radius = dims.x
 			cyl.height = dims.y
-			cyl.radial_segments = 12  # Smoother silhouette for pop-art outlines
+			cyl.radial_segments = 24  # 24 segments = 15° per face, removes visible "line" banding in cel shader
 			mi.mesh = cyl
 		BlockCategories.SHAPE_CAPSULE:
 			var cap := CapsuleMesh.new()
@@ -174,7 +174,7 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 			cone.top_radius = 0.0
 			cone.bottom_radius = dims.x
 			cone.height = dims.y
-			cone.radial_segments = 12
+			cone.radial_segments = 24  # Match cylinder — 24 segments removes visible cel-shading bands
 			mi.mesh = cone
 		BlockCategories.SHAPE_TORUS:
 			var torus := TorusMesh.new()
