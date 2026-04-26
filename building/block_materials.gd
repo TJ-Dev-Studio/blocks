@@ -44,6 +44,29 @@ const TEXTURED_MATERIALS: Dictionary = {
 	"bark": "res://assets/textures/blocks/bark/bark_a.png",
 	"bark_dark": "res://assets/textures/blocks/bark/bark_b.png",
 	"driftwood": "res://assets/textures/blocks/bark/bark_c.png",
+	"brick": "res://assets/textures/blocks/brick/brick_a.png",
+	"stone": "res://assets/textures/blocks/stone/stone_a.png",
+	"stone_dark": "res://assets/textures/blocks/brick/brick_a.png",
+	"wood_dark": "res://assets/textures/blocks/wood_dark/wood_dark_a.png",
+	"metal_dark": "res://assets/textures/blocks/metal_dark/metal_dark_a.png",
+}
+
+## Per-material switch: should the textured shader use plain UV mapping
+## (mesh's existing per-face UVs) or triplanar projection from world position?
+## Triplanar is right for organic curvy meshes (tree trunks, sphere canopies)
+## where a single UV unwrap would stretch. Plain UV is right for cubic
+## blocks (parapets, pillars, brick walls) where triplanar's per-pixel
+## 3-projection blend produces visible strobe under camera motion. Default
+## triplanar=true preserves bark/driftwood appearance.
+const TEXTURED_USE_TRIPLANAR: Dictionary = {
+	"bark": true,
+	"bark_dark": true,
+	"driftwood": true,
+	"brick": false,
+	"stone": false,
+	"stone_dark": false,
+	"wood_dark": false,
+	"metal_dark": false,
 }
 
 ## Lazy-load the block world shader. Returns null if the file is missing.
@@ -422,6 +445,12 @@ static func _get_textured_material(palette_key: String, texture_path: String) ->
 	smat.set_shader_parameter("use_albedo_texture", true)
 	smat.set_shader_parameter("albedo_texture", tex)
 	smat.set_shader_parameter("albedo_texture_scale", 0.5)
+	# Per-material triplanar toggle. False for cubic blocks (brick / stone /
+	# parapet) where triplanar's 3-projection blend strobes pixel-by-pixel
+	# under camera motion. True for organic meshes (bark on cylindrical
+	# trunks, sphere canopies) where plain UV would stretch.
+	smat.set_shader_parameter("use_triplanar_uv",
+			bool(TEXTURED_USE_TRIPLANAR.get(palette_key, true)))
 	if shader_param_injector.is_valid():
 		shader_param_injector.call(palette_key, smat)
 
