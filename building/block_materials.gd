@@ -50,12 +50,16 @@ const TEXTURED_MATERIALS: Dictionary = {
 	# big brown-rimmed cells that look like blobs, NOT bricks. Wiring them
 	# all to the painted PNGs gives consistent brick rendering across all
 	# arena assemblies.
+	# All stone-ish materials use the painted BRICK texture, not stone_a.png.
+	# stone_a.png is a hexagonal cobblestone tile pattern that looks like
+	# big rounded blobs with darker edges — what Mike saw as "streaks" for
+	# days. brick_a.png is straightforward brick wall, reads consistently.
 	"brick": "res://assets/textures/blocks/brick/brick_a.png",
-	"stone": "res://assets/textures/blocks/stone/stone_a.png",
+	"stone": "res://assets/textures/blocks/brick/brick_a.png",
 	"stone_dark": "res://assets/textures/blocks/brick/brick_a.png",
-	"stone_gray": "res://assets/textures/blocks/stone/stone_a.png",
-	"stone_light": "res://assets/textures/blocks/stone/stone_a.png",
-	"concrete": "res://assets/textures/blocks/stone/stone_a.png",
+	"stone_gray": "res://assets/textures/blocks/brick/brick_a.png",
+	"stone_light": "res://assets/textures/blocks/brick/brick_a.png",
+	"concrete": "res://assets/textures/blocks/brick/brick_a.png",
 	"wood_dark": "res://assets/textures/blocks/wood_dark/wood_dark_a.png",
 	"metal_dark": "res://assets/textures/blocks/metal_dark/metal_dark_a.png",
 }
