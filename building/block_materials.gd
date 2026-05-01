@@ -273,6 +273,11 @@ static func get_material(material_id: String) -> Material:
 	if material_post_processor.is_valid():
 		mat = material_post_processor.call(material_id, mat)
 
+	# Tag with material_id so WorldCacheLoader can re-apply current block_style
+	# after loading a zone .scn that has baked-in materials from a previous compile.
+	# resource_name survives PackedScene packing and loading.
+	mat.resource_name = material_id
+
 	_cache[material_id] = mat
 	return mat
 
@@ -513,13 +518,4 @@ static func prewarm_procedural_shaders(parent: Node3D) -> void:
 		mi.material_override = mat
 		mi.visible = false
 		parent.add_child(mi)
-		mi.queue_free()  # Freed after one frame — shader is compiled by then
-
-
-## Clear the cache (useful for testing).
-static func clear_cache() -> void:
-	_cache.clear()
-	_override_cache.clear()
-	# Release static shader references so GPU programs can be freed
-	_shader = null
-	_proc_shader = null
+		mi.queue_free()  # Freed after one frame 
