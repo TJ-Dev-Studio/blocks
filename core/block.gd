@@ -233,6 +233,11 @@ var placement_rules: Array = []
 # =========================================================================
 
 ## Generate a unique block ID if none is set.
+##
+## NOTE: Uses Time.get_ticks_msec() + a per-process counter, so the same JSON
+## block gets a DIFFERENT id every time it's loaded — fine within a session,
+## fatal for any sidecar / cache that stores block_ids and expects to find
+## the same block on next launch. Prefer ensure_stable_id() for that case.
 func ensure_id() -> void:
 	if block_id.is_empty():
 		_id_counter += 1
@@ -242,6 +247,30 @@ func ensure_id() -> void:
 			Time.get_ticks_msec(),
 			_id_counter,
 		]
+
+
+## Generate a deterministic block ID from a stable seed. The same seed always
+## produces the same id, so the id survives game restarts, world-compile bakes,
+## and stale-cache reloads. Use this for JSON-loaded blocks where the Design
+## Studio sidecar / cache loader needs to match by id across sessions.
+##
+## Seed must uniquely identify the block: typically `source_path:child_index:
+## element_ref` for assembly children, `source_path:_root` for assembly roots.
+## A short SHA1 prefix gives 48 bits of entropy — collision risk negligible
+## within a single map.
+func ensure_stable_id(stable_seed: String) -> void:
+	if not block_id.is_empty():
+		return
+	if stable_seed.is_empty():
+		ensure_id()
+		return
+	var name_part: String = block_name.to_snake_case() if not block_name.is_empty() else "unnamed"
+	var seed_hash: String = stable_seed.sha1_text().substr(0, 12)
+	block_id = "%s_%s_%s" % [
+		BlockCategories.category_name(category),
+		name_part,
+		seed_hash,
+	]
 
 
 ## Convert to server-side collision box dictionary.
