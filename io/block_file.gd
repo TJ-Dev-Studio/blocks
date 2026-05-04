@@ -288,9 +288,18 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 			expanded = [child_def]
 
 		# Per-instance override for this child (only valid for non-pattern children).
+		# Pattern-expanded entries can produce many positioned blocks from one
+		# JSON entry — keying by index is ambiguous, so this path skips them.
+		# Warn loud when an override IS authored for a pattern entry so the
+		# author knows the override was silently dropped.
 		var per_instance: Dictionary = {}
-		if has_per_instance_overrides and not is_pattern:
-			per_instance = child_overrides.get(str(child_def_idx), {})
+		if has_per_instance_overrides:
+			if is_pattern:
+				if child_overrides.has(str(child_def_idx)):
+					push_warning("[BlockFile] Pattern-expanded child #%d (element_ref='%s') in '%s' carries a per-instance override but pattern children are not overridable. Override will be ignored." % [
+						child_def_idx, child_def.get("element_ref", "?"), root.block_name])
+			else:
+				per_instance = child_overrides.get(str(child_def_idx), {})
 
 		for effective_child: Dictionary in expanded:
 			var element_ref: String = effective_child.get("element_ref", "")
