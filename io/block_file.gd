@@ -60,8 +60,20 @@ const LAYER_MAP := {
 
 ## Load and parse a .block.json file. Returns the raw Dictionary.
 ## Returns empty dict on failure.
+##
+## In editor / dev builds we read via the OS path (ProjectSettings.globalize_
+## path) to bypass Godot's resource-system cache — the Studio hot-reload path
+## needs each parse to see current bytes on disk, not a snapshot from
+## game-launch time. Falls back to the original path for packaged builds
+## where files live inside the .pck archive.
 static func load_file(path: String) -> Dictionary:
-	var file := FileAccess.open(path, FileAccess.READ)
+	var disk_path: String = path
+	if path.begins_with("res://"):
+		disk_path = ProjectSettings.globalize_path(path)
+	var file := FileAccess.open(disk_path, FileAccess.READ)
+	if not file:
+		# Fall back to res:// for packaged builds where globalize fails.
+		file = FileAccess.open(path, FileAccess.READ)
 	if not file:
 		push_error("[BlockFile] Cannot open file: %s" % path)
 		return {}
