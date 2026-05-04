@@ -85,6 +85,33 @@ const TEXTURED_USE_TRIPLANAR: Dictionary = {
 	"metal_dark": false,
 }
 
+## Per-material scalar tiling for the block_world shader's
+## albedo_texture_scale uniform (float). Higher = more tiling = smaller
+## pattern. Materials not listed fall back to TEXTURED_DEFAULT_SCALE.
+const TEXTURED_DEFAULT_SCALE: float = 0.5
+const TEXTURED_SCALE_OVERRIDES: Dictionary = {
+	"brick":       12.0,
+	"stone":       12.0,
+	"stone_dark":  12.0,
+	"stone_gray":  12.0,
+	"stone_light": 12.0,
+	"concrete":    9.0,
+}
+
+## Per-material U:V aspect override for textures whose painted pattern is
+## non-square (e.g. brick — bricks are wider than tall in the source PNG).
+## Applied as `UV * scale * aspect` in the shader, so vec2(3,1) tiles U 3×
+## more than V — squashing visual brick width back toward square. Default
+## vec2(1,1) is a no-op so untextured materials render identically.
+const TEXTURED_DEFAULT_ASPECT: Vector2 = Vector2(1.0, 1.0)
+const TEXTURED_ASPECT_OVERRIDES: Dictionary = {
+	"brick":       Vector2(3.0, 1.0),
+	"stone":       Vector2(3.0, 1.0),
+	"stone_dark":  Vector2(3.0, 1.0),
+	"stone_gray":  Vector2(3.0, 1.0),
+	"stone_light": Vector2(3.0, 1.0),
+}
+
 ## Lazy-load the block world shader. Returns null if the file is missing.
 static func _get_shader() -> Shader:
 	if _shader == null:
@@ -465,7 +492,10 @@ static func _get_textured_material(palette_key: String, texture_path: String) ->
 	smat.set_shader_parameter("tint_color", Color.WHITE)
 	smat.set_shader_parameter("use_albedo_texture", true)
 	smat.set_shader_parameter("albedo_texture", tex)
-	smat.set_shader_parameter("albedo_texture_scale", 0.5)
+	smat.set_shader_parameter("albedo_texture_scale",
+			float(TEXTURED_SCALE_OVERRIDES.get(palette_key, TEXTURED_DEFAULT_SCALE)))
+	smat.set_shader_parameter("albedo_uv_aspect",
+			TEXTURED_ASPECT_OVERRIDES.get(palette_key, TEXTURED_DEFAULT_ASPECT) as Vector2)
 	# Per-material triplanar toggle. False for cubic blocks (brick / stone /
 	# parapet) where triplanar's 3-projection blend strobes pixel-by-pixel
 	# under camera motion. True for organic meshes (bark on cylindrical
