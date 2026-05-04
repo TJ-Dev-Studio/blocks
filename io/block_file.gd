@@ -231,7 +231,15 @@ static func file_to_block(data: Dictionary) -> Block:
 ## Convert an assembly block-file dict into an array of Blocks with parent-child links.
 ## element_resolver: Callable(ref: String) -> Dictionary — resolves an element_ref
 ## to its parsed JSON data.
-static func file_to_assembly(data: Dictionary, element_resolver: Callable) -> Array[Block]:
+## child_overrides: optional per-instance override map keyed by stringified child
+## index. Each entry can carry `placement.position`, `placement.rotation_y`, and
+## `overrides` (dot-syntax keys). Applied AFTER the assembly's own defaults so
+## the structure that placed this assembly can edit individual children without
+## mutating the shared assembly JSON. Empty dict = no per-instance overrides.
+## Pattern-expanded children are NOT overridable through this path (they share
+## one source entry, so per-position keying is ambiguous).
+static func file_to_assembly(data: Dictionary, element_resolver: Callable,
+		child_overrides: Dictionary = {}) -> Array[Block]:
 	var blocks: Array[Block] = []
 
 	# Create assembly root block (no visual, just a container)
@@ -260,12 +268,17 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable) -> Ar
 
 	blocks.append(root)
 
-	# Process children (with pattern expansion)
+	# Process children (with pattern expansion). We track the JSON child index
+	# (`child_def_idx`) so each non-pattern child can opt into a per-instance
+	# override layer keyed by that index.
 	var children: Array = data.get("children", [])
-	for child_def: Dictionary in children:
+	var has_per_instance_overrides: bool = not child_overrides.is_empty()
+	for child_def_idx in children.size():
+		var child_def: Dictionary = children[child_def_idx]
 		# Pattern expansion: one JSON entry → many positioned children
 		var expanded: Array = []
-		if child_def.has("pattern"):
+		var is_pattern: bool = child_def.has("pattern")
+		if is_pattern:
 			expanded = BlockPatternExpander.expand(child_def)
 			if expanded.is_empty():
 				push_warning("[BlockFile] Pattern expansion produced 0 children for '%s' in %s"
@@ -273,6 +286,11 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable) -> Ar
 				continue
 		else:
 			expanded = [child_def]
+
+		# Per-instance override for this child (only valid for non-pattern children).
+		var per_instance: Dictionary = {}
+		if has_per_instance_overrides and not is_pattern:
+			per_instance = child_overrides.get(str(child_def_idx), {})
 
 		for effective_child: Dictionary in expanded:
 			var element_ref: String = effective_child.get("element_ref", "")
@@ -322,9 +340,34 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable) -> Ar
 				lc["shadow"] = bool(child_light.get("shadow", false))
 				child_block.light_config = lc
 
+			# Per-instance override layer — applied AFTER the assembly's own
+			# defaults so the structure that placed this assembly can shift one
+			# child's position / change its material / rotate it without touching
+			# the shared assembly JSON. Same dot-syntax as the assembly's own
+			# overrides; placement.position is interpreted as the new local
+			# position relative to the assembly origin (we re-add world_pos).
+			if not per_instance.is_empty():
+				var pi_placement: Dictionary = per_instance.get("placement", {})
+				if pi_placement.has("position"):
+					child_block.position = world_pos + _arr_to_vec3(pi_placement["position"])
+				if pi_placement.has("rotation_y"):
+					child_block.rotation_y = pi_placement["rotation_y"]
+				if pi_placement.has("scale_factor"):
+					child_block.scale_factor = pi_placement["scale_factor"]
+				var pi_overrides: Dictionary = per_instance.get("overrides", {})
+				if not pi_overrides.is_empty():
+					apply_overrides(child_block, pi_overrides)
+
 			child_block.ensure_id()
 			child_block.parent_id = root.block_id
 			root.add_child_link(child_block.block_id)
+			# Stamp the JSON child def index on the Block resource so the
+			# Studio's save path can locate the correct override slot. The
+			# legacy assembly_child_index meta (set by BlocksFactory after
+			# load_assembly returns) used a flat output index that drifted
+			# under pattern expansion; this is the unambiguous source-side
+			# index in the children[] array.
+			child_block.set_meta("assembly_child_def_index", child_def_idx)
 			blocks.append(child_block)
 
 	return blocks
