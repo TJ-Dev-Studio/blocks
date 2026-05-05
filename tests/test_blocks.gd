@@ -723,7 +723,7 @@ func _test_lifecycle() -> void:
 func _test_material_cache() -> void:
 	_section("Material Cache")
 
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 
 	# Same material ID returns same instance
 	var mat1 := BlockMaterials.get_material("wood")
@@ -1042,7 +1042,7 @@ func _get_mesh_from_node(node: Node3D) -> MeshInstance3D:
 func _test_material_override_cache() -> void:
 	_section("Material Override Cache (Phase 9-01)")
 
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 
 	# --- get_material_with_overrides returns ShaderMaterial with correct param ---
 	var mat_a: Material = BlockMaterials.get_material_with_overrides("bark", {"roughness": 0.3})
@@ -1062,7 +1062,7 @@ func _test_material_override_cache() -> void:
 	_assert(mat_a != mat_c, "override cache: different params return different instances")
 
 	# --- Quantization: 0.28 and 0.30 share same instance (0.05 step rounding) ---
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 	var mat_q1: Material = BlockMaterials.get_material_with_overrides("wood", {"roughness": 0.28})
 	var mat_q2: Material = BlockMaterials.get_material_with_overrides("wood", {"roughness": 0.30})
 	_assert(mat_q1 == mat_q2, "override cache: 0.28 and 0.30 share instance via quantization")
@@ -1081,18 +1081,18 @@ func _test_material_override_cache() -> void:
 	_assert(mat_glass is StandardMaterial3D,
 		"transparent material: override returns base StandardMaterial3D unchanged")
 
-	# --- clear_cache empties both caches ---
+	# --- clear_override_cache empties the cache ---
 	var id_before: int = mat_t1.get_instance_id()
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 	var mat_t3: Material = BlockMaterials.get_material_tinted("wood", tint)
 	_assert(mat_t3.get_instance_id() != id_before,
-		"clear_cache: after clear, new tinted call returns new instance")
+		"clear_override_cache: after clear, new tinted call returns new instance")
 
 
 func _test_builder_material_dispatch() -> void:
 	_section("Builder Material Dispatch (Phase 9-02)")
 
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 	var parent := Node3D.new()
 	add_child(parent)
 
@@ -1337,7 +1337,7 @@ func _test_builder_material_dispatch() -> void:
 func _test_procedural_material_cache() -> void:
 	_section("Procedural Material Cache (Phase 10-01)")
 
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 
 	# --- get_procedural_material returns non-null ---
 	var mat_bark: Material = BlockMaterials.get_procedural_material("bark", "bark")
@@ -1428,7 +1428,7 @@ func _test_prewarm_shaders() -> void:
 	_section("Procedural Shader Prewarm (Phase 10-02)")
 
 	# --- prewarm does not crash when called with a valid Node3D parent ---
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 	var parent := Node3D.new()
 	add_child(parent)
 	# Must not crash (headless may not compile shaders, but the call must be safe)
@@ -1438,7 +1438,7 @@ func _test_prewarm_shaders() -> void:
 
 	# --- After prewarm, get_procedural_material("bark","default") returns cached instance ---
 	# prewarm populates the cache with "default" palette key for all 5 types
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 	var parent2 := Node3D.new()
 	add_child(parent2)
 	BlockMaterials.prewarm_procedural_shaders(parent2)
@@ -1448,7 +1448,7 @@ func _test_prewarm_shaders() -> void:
 	parent2.queue_free()
 
 	# --- After prewarm, stone/moss/water/wood are also cached ---
-	BlockMaterials.clear_cache()
+	BlockMaterials.clear_override_cache()
 	var parent3 := Node3D.new()
 	add_child(parent3)
 	BlockMaterials.prewarm_procedural_shaders(parent3)
