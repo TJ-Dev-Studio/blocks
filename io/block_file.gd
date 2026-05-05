@@ -301,17 +301,32 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 
 		# Per-instance override for this child (only valid for non-pattern children).
 		# Pattern-expanded entries can produce many positioned blocks from one
-		# JSON entry — keying by index is ambiguous, so this path skips them.
-		# Warn loud when an override IS authored for a pattern entry so the
-		# author knows the override was silently dropped.
+		# JSON entry — keying by index/name is ambiguous, so this path skips them.
+		#
+		# Lookup priority for non-pattern children:
+		#   1. by identity.name (stable across array reordering / sibling
+		#      deletions — preferred for new saves)
+		#   2. by str(child_def_idx) (legacy index-keyed format — kept for
+		#      backward compat with structure JSONs written before name keying)
+		#
+		# Index-keyed entries are inherently brittle because deleting a
+		# sibling shifts every later index by 1, silently re-pointing the
+		# override at the wrong child. New writes go through editor_selection
+		# which always emits name keys; this read tolerates both.
 		var per_instance: Dictionary = {}
+		var child_name_key: String = ""
+		if not is_pattern:
+			child_name_key = str(child_def.get("overrides", {}).get("identity.name", ""))
 		if has_per_instance_overrides:
 			if is_pattern:
 				if child_overrides.has(str(child_def_idx)):
 					push_warning("[BlockFile] Pattern-expanded child #%d (element_ref='%s') in '%s' carries a per-instance override but pattern children are not overridable. Override will be ignored." % [
 						child_def_idx, child_def.get("element_ref", "?"), root.block_name])
 			else:
-				per_instance = child_overrides.get(str(child_def_idx), {})
+				if not child_name_key.is_empty() and child_overrides.has(child_name_key):
+					per_instance = child_overrides[child_name_key]
+				else:
+					per_instance = child_overrides.get(str(child_def_idx), {})
 
 		for effective_child: Dictionary in expanded:
 			var element_ref: String = effective_child.get("element_ref", "")
