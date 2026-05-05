@@ -1228,35 +1228,39 @@ func _test_builder_material_dispatch() -> void:
 		_assert(true, "dispatch shader: (no shader loaded headless — skip priority test)")
 
 	# --- Test A: Procedural dispatch (material_type_id set) ---
+	# Uses moss (type=3) — not in TEXTURED_MATERIALS so it goes through the
+	# procedural shader path and sets the material_type uniform.
 	var b_proc := Block.new()
-	b_proc.block_name = "dispatch_proc_bark"
+	b_proc.block_name = "dispatch_proc_moss"
 	b_proc.collision_shape = BlockCategories.SHAPE_BOX
 	b_proc.collision_size = Vector3(1, 1, 1)
 	b_proc.interaction = BlockCategories.INTERACT_SOLID
-	b_proc.material_id = "bark"
-	b_proc.material_type_id = "bark"
+	b_proc.material_id = "moss"
+	b_proc.material_type_id = "moss"
 	b_proc.ensure_id()
 	var node_proc := BlockBuilder.build(b_proc, parent)
 	var mesh_proc := _get_mesh_from_node(node_proc)
 	_assert(mesh_proc != null, "dispatch proc: Mesh node created")
 	_assert(mesh_proc.material_override != null, "dispatch proc: material_override set")
-	var base_bark: Material = BlockMaterials.get_material("bark")
-	_assert(mesh_proc.material_override != base_bark,
+	var base_moss: Material = BlockMaterials.get_material("moss")
+	_assert(mesh_proc.material_override != base_moss,
 		"dispatch proc: procedural block gets different instance from base cache")
 	if mesh_proc.material_override is ShaderMaterial:
 		var type_int = (mesh_proc.material_override as ShaderMaterial).get_shader_parameter("material_type")
-		_assert(type_int == 1, "dispatch proc: material_type uniform == 1 (bark)")
+		_assert(type_int == 3, "dispatch proc: material_type uniform == 3 (moss)")
 	else:
 		_assert(true, "dispatch proc: (headless fallback — skipping material_type param check)")
 
 	# --- Test B: Procedural wins over shader_path ---
+	# Uses water (type=4) — not in TEXTURED_MATERIALS so material_type_id takes
+	# precedence over an explicit shader_path and sets the material_type uniform.
 	var b_proc_vs_shader := Block.new()
 	b_proc_vs_shader.block_name = "dispatch_proc_vs_shader"
 	b_proc_vs_shader.collision_shape = BlockCategories.SHAPE_BOX
 	b_proc_vs_shader.collision_size = Vector3(1, 1, 1)
 	b_proc_vs_shader.interaction = BlockCategories.INTERACT_SOLID
-	b_proc_vs_shader.material_id = "stone"
-	b_proc_vs_shader.material_type_id = "stone"
+	b_proc_vs_shader.material_id = "water"
+	b_proc_vs_shader.material_type_id = "water"
 	b_proc_vs_shader.shader_path = "res://assets/shaders/block_world.gdshader"
 	b_proc_vs_shader.ensure_id()
 	var node_pvs := BlockBuilder.build(b_proc_vs_shader, parent)
@@ -1264,7 +1268,7 @@ func _test_builder_material_dispatch() -> void:
 	_assert(mesh_pvs != null, "dispatch proc>shader: Mesh node created")
 	if mesh_pvs != null and mesh_pvs.material_override is ShaderMaterial:
 		var type_int_pvs = (mesh_pvs.material_override as ShaderMaterial).get_shader_parameter("material_type")
-		_assert(type_int_pvs == 2, "dispatch proc>shader: material_type == 2 (stone, not flat)")
+		_assert(type_int_pvs == 4, "dispatch proc>shader: material_type == 4 (water, not flat)")
 	else:
 		_assert(true, "dispatch proc>shader: (headless fallback — skipping param check)")
 

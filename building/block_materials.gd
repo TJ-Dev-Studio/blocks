@@ -422,11 +422,13 @@ static func _make_override_key(material_id: String, params: Dictionary) -> Strin
 ## is evicted on zone unload along with other per-element instances.
 ## Falls back to get_material(palette_key) if the shader cannot be loaded.
 static func get_procedural_material(material_type: String, palette_key: String) -> Material:
-	# If this material has a hand-painted PNG texture, route through the
-	# textured shader path INSTEAD of the procedural noise shader. Eliminates
-	# motion-aliased per-pixel noise on bark/wood/etc. — see TEXTURED_MATERIALS.
-	if TEXTURED_MATERIALS.has(palette_key):
-		return _get_textured_material(palette_key, TEXTURED_MATERIALS[palette_key])
+	# If the requested effect type has a hand-painted PNG texture, route through
+	# the textured shader path to avoid motion-aliased per-pixel noise.
+	# Check material_type (the intended effect), NOT palette_key, so that
+	# e.g. get_procedural_material("moss", "bark") correctly uses procedural
+	# moss noise rather than being redirected to the bark texture.
+	if TEXTURED_MATERIALS.has(material_type):
+		return _get_textured_material(palette_key, TEXTURED_MATERIALS[material_type])
 
 	var key: String = "proc|%s|%s" % [material_type, palette_key]
 	if _override_cache.has(key):
