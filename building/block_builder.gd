@@ -223,9 +223,10 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 		_apply_multi_material(mi, block)
 		if not block.cast_shadow:
 			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.visibility_range_end = 350.0 if "sky" in block.tags else _compute_vis_range(block)
-		mi.visibility_range_end_margin = 2.0
-		mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+		# Per-mesh distance culling disabled — Forward+ frustum culling handles it
+		# fine on desktop, and per-tier visibility ranges caused noticeable pop-in.
+		# Re-enable selectively if perf becomes a problem.
+		mi.visibility_range_end = 0.0
 		root.add_child(mi)
 		return
 
@@ -262,13 +263,8 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 	if not block.cast_shadow:
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
-	# Distance culling for un-merged blocks (large assemblies like terrain/forest).
-	# Merged assemblies (<40m extent) use frustum culling only — no vis range needed.
-	# Volume-based tiers: small decorations cull at 30m, large terrain at 100m.
-	# Sky-tagged blocks (clouds) get a large 350m range — visible from afar but not infinite.
-	mi.visibility_range_end = 350.0 if "sky" in block.tags else _compute_vis_range(block)
-	mi.visibility_range_end_margin = 2.0
-	mi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+	# Per-mesh distance culling disabled — see _compute_vis_range note above.
+	mi.visibility_range_end = 0.0
 
 	root.add_child(mi)
 
