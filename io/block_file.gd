@@ -250,8 +250,16 @@ static func file_to_block(data: Dictionary) -> Block:
 ## mutating the shared assembly JSON. Empty dict = no per-instance overrides.
 ## Pattern-expanded children are NOT overridable through this path (they share
 ## one source entry, so per-position keying is ambiguous).
+##
+## extra_children: optional per-placement extra child entries appended to the
+## assembly's authored children[] AT LOAD TIME. Used by the design-studio COPY
+## flow to add new instances at the structure scope without mutating the shared
+## assembly JSON. Each extra carries the same shape as an authored child entry
+## (element_ref + placement + overrides), gets a child_def_idx of
+## original_count + i, and respects per-instance child_overrides keyed by its
+## identity.name. Empty array = no extras (default; preserves existing behavior).
 static func file_to_assembly(data: Dictionary, element_resolver: Callable,
-		child_overrides: Dictionary = {}) -> Array[Block]:
+		child_overrides: Dictionary = {}, extra_children: Array = []) -> Array[Block]:
 	var blocks: Array[Block] = []
 
 	# Create assembly root block (no visual, just a container)
@@ -283,10 +291,32 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 	# Process children (with pattern expansion). We track the JSON child index
 	# (`child_def_idx`) so each non-pattern child can opt into a per-instance
 	# override layer keyed by that index.
+	#
+	# `extra_children` are appended to the iteration AFTER the authored
+	# children. They get child_def_idx values starting at children.size(),
+	# stamped on each block as `assembly_child_def_index`. This means a
+	# structure-scoped COPY (which appends an entry to a placement's
+	# extra_children) produces blocks with idx ≥ original_count — these
+	# indices are STABLE across reloads of the same placement because the
+	# authored children[] never shifts. The Studio save path's
+	# `_find_persist_target` resolves these blocks back to the structure
+	# JSON via identity.name (the universal stable handle).
 	var children: Array = data.get("children", [])
+	var extras: Array = extra_children if extra_children is Array else []
+	var combined_count: int = children.size() + extras.size()
 	var has_per_instance_overrides: bool = not child_overrides.is_empty()
-	for child_def_idx in children.size():
-		var child_def: Dictionary = children[child_def_idx]
+	for child_def_idx in combined_count:
+		var is_extra: bool = child_def_idx >= children.size()
+		var child_def: Dictionary
+		if is_extra:
+			var src = extras[child_def_idx - children.size()]
+			if not src is Dictionary:
+				push_warning("[BlockFile] extra_children[%d] is not a Dictionary in %s — skipping" % [
+					child_def_idx - children.size(), root.block_name])
+				continue
+			child_def = src as Dictionary
+		else:
+			child_def = children[child_def_idx]
 		# Pattern expansion: one JSON entry → many positioned children
 		var expanded: Array = []
 		var is_pattern: bool = child_def.has("pattern")
