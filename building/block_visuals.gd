@@ -4,16 +4,38 @@ class_name BlockVisuals
 ## Modifies MeshInstance3D materials on already-built block nodes.
 ## Use for: power-on glow, damage flashes, highlight selection, etc.
 ## Clones material once per block, then modifies in-place on subsequent calls.
+##
+## Material handling strategy:
+##   ShaderMaterial  — the normal FrogMog path (block_world.gdshader).
+##                     Duplicated on first use; emission faked via tint_color
+##                     brightening; albedo_color shader param for color changes.
+##   StandardMaterial3D — legacy/fallback path.
+##                     Duplicated on first use; uses built-in emission props.
 
 ## Metadata key used to track whether a MeshInstance3D's material_override
 ## has already been cloned for per-instance modification.
 const _OWNED_META := &"bv_owned"
 
 
+## Ensure a per-instance COPY of the block's material_override exists.
+## For ShaderMaterial blocks: duplicates the ShaderMaterial (preserving
+## texture, outline next_pass, canvas grain, etc.) and returns it.
+## For StandardMaterial3D blocks: same, returns the cloned standard mat.
+## Returns null if there is no material_override to clone from.
+static func _ensure_owned_shader_material(mesh: MeshInstance3D) -> ShaderMaterial:
+	if mesh.has_meta(_OWNED_META) and mesh.material_override is ShaderMaterial:
+		return mesh.material_override as ShaderMaterial
+	if not (mesh.material_override is ShaderMaterial):
+		return null
+	var mat: ShaderMaterial = mesh.material_override.duplicate() as ShaderMaterial
+	mesh.material_override = mat
+	mesh.set_meta(_OWNED_META, true)
+	return mat
+
+
 ## Get or create a per-instance StandardMaterial3D for a block's mesh.
-## First call clones the shared material; subsequent calls return the
-## existing clone for in-place modification (no allocation).
-static func _ensure_owned_material(mesh: MeshInstance3D, block: Block) -> StandardMaterial3D:
+## Only used when the existing material_override is already StandardMaterial3D.
+static func _ensure_owned_std_material(mesh: MeshInstance3D, block: Block) -> StandardMaterial3D:
 	if mesh.has_meta(_OWNED_META) and mesh.material_override is StandardMaterial3D:
 		return mesh.material_override as StandardMaterial3D
 	var mat: StandardMaterial3D
@@ -29,6 +51,8 @@ static func _ensure_owned_material(mesh: MeshInstance3D, block: Block) -> Standa
 
 
 ## Set emission color and intensity on a block's mesh.
+## ShaderMaterial: fakes emission by multiplying tint_color (preserves texture).
+## StandardMaterial3D: uses built-in emission properties.
 ## Returns true if the mesh was found and modified.
 static func set_emission(block: Block, color: Color, energy: float = 1.0) -> bool:
 	if block.node == null:
@@ -37,7 +61,15 @@ static func set_emission(block: Block, color: Color, energy: float = 1.0) -> boo
 	if mesh == null:
 		return false
 
-	var mat: StandardMaterial3D = _ensure_owned_material(mesh, block)
+	var smat: ShaderMaterial = _ensure_owned_shader_material(mesh)
+	if smat != null:
+		if energy > 0.0:
+			smat.set_shader_parameter("tint_color", color * energy)
+		else:
+			smat.set_shader_parameter("tint_color", Color.WHITE)
+		return true
+
+	var mat: StandardMaterial3D = _ensure_owned_std_material(mesh, block)
 	mat.emission_enabled = energy > 0.0
 	mat.emission = color
 	mat.emission_energy_multiplier = energy
@@ -50,6 +82,8 @@ static func clear_emission(block: Block) -> bool:
 
 
 ## Set albedo color on a block's mesh (change base color at runtime).
+## ShaderMaterial: sets albedo_color + resets tint_color to white.
+## StandardMaterial3D: sets albedo_color directly.
 static func set_color(block: Block, color: Color) -> bool:
 	if block.node == null:
 		return false
@@ -57,7 +91,13 @@ static func set_color(block: Block, color: Color) -> bool:
 	if mesh == null:
 		return false
 
-	var mat: StandardMaterial3D = _ensure_owned_material(mesh, block)
+	var smat: ShaderMaterial = _ensure_owned_shader_material(mesh)
+	if smat != null:
+		smat.set_shader_parameter("albedo_color", color)
+		smat.set_shader_parameter("tint_color", Color.WHITE)
+		return true
+
+	var mat: StandardMaterial3D = _ensure_owned_std_material(mesh, block)
 	mat.albedo_color = color
 	return true
 
