@@ -334,7 +334,7 @@ static func get_color(material_id: String) -> Color:
 
 ## Check if a material_id exists in the palette.
 static func has_material(material_id: String) -> bool:
-	return palette_override.has(material_id) or PALETTE.has(material_id)
+	return palette_override.has(material_id) or PALETTE.has(material_id) or TEXTURED_MATERIALS.has(material_id)
 
 
 ## Get all palette keys (base + overrides merged).
