@@ -511,6 +511,12 @@ static func _get_textured_material(palette_key: String, texture_path: String) ->
 	if material_post_processor.is_valid():
 		final_mat = material_post_processor.call(palette_key, smat)
 
+	# Stamp resource_name so _reapply_materials_recursive() can identify and
+	# replace this material after loading a cached .scn (resource_name survives
+	# PackedScene serialization). Without this, all textured materials have
+	# resource_name="" and the reapply pass silently skips them every time.
+	final_mat.resource_name = palette_key
+
 	_override_cache[key] = final_mat
 	return final_mat
 
