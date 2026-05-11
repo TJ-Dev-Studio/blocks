@@ -258,8 +258,19 @@ static func file_to_block(data: Dictionary) -> Block:
 ## (element_ref + placement + overrides), gets a child_def_idx of
 ## original_count + i, and respects per-instance child_overrides keyed by its
 ## identity.name. Empty array = no extras (default; preserves existing behavior).
+## `deleted_children` is a list of per-placement DELETION markers — each entry
+## is `{element_ref: String, position: [x,y,z]}`. Children matching any marker
+## (element_ref equal, position within 1mm) are SKIPPED during build. This is
+## the per-instance delete primitive: deleting one floor tile in studio writes
+## one marker to the parent structure's `assemblies[N].deleted_children`,
+## and only THIS placement loses that child — other placements of the same
+## assembly file render normally. Without this, deletes had to fall back to
+## mutating the shared assembly JSON's `children[]`, which removed the child
+## from EVERY placement world-wide (the "deleted one tile, all tiles gone"
+## bug). Empty array = no deletions (default; preserves existing behavior).
 static func file_to_assembly(data: Dictionary, element_resolver: Callable,
-		child_overrides: Dictionary = {}, extra_children: Array = []) -> Array[Block]:
+		child_overrides: Dictionary = {}, extra_children: Array = [],
+		deleted_children: Array = []) -> Array[Block]:
 	var blocks: Array[Block] = []
 
 	# Create assembly root block (no visual, just a container)
@@ -362,6 +373,14 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 			var element_ref: String = effective_child.get("element_ref", "")
 			if element_ref.is_empty():
 				push_warning("[BlockFile] Assembly child missing element_ref in %s" % root.block_name)
+				continue
+
+			# Per-placement deletion: skip this child if a matching marker is
+			# in `deleted_children` for THIS placement. Matches when element_ref
+			# is identical AND placement.position is within 1mm of the marker.
+			# Identity.name (when present) is also accepted as a match key.
+			if not deleted_children.is_empty() \
+					and _child_is_deleted(effective_child, element_ref, deleted_children):
 				continue
 
 			var element_data: Dictionary = element_resolver.call(element_ref)
@@ -476,6 +495,45 @@ static func _arr_to_vec3(arr) -> Vector3:
 	if arr is Array and arr.size() >= 3:
 		return Vector3(float(arr[0]), float(arr[1]), float(arr[2]))
 	return Vector3.ZERO
+
+
+## True if `child_def` matches any marker in `deleted_children`. Markers are
+## `{element_ref, position}` dicts (and optionally `name` for named children).
+## Match rules: element_ref must equal (case-sensitive) AND position within
+## 1mm OR identity.name equals when the marker carries one.
+static func _child_is_deleted(child_def: Dictionary, child_element_ref: String,
+		deleted_children: Array) -> bool:
+	var child_pos: Array = child_def.get("placement", {}).get("position", [])
+	var child_name: String = str(child_def.get("overrides", {}).get("identity.name", ""))
+	for marker_v in deleted_children:
+		if not marker_v is Dictionary:
+			continue
+		var marker: Dictionary = marker_v
+		# Name-based match wins if both sides have a name.
+		var marker_name: String = str(marker.get("name", ""))
+		if not child_name.is_empty() and not marker_name.is_empty():
+			if marker_name == child_name:
+				return true
+			continue  # different names — not this child
+		# Fall back to element_ref + position match.
+		var marker_er: String = str(marker.get("element_ref", ""))
+		if not marker_er.is_empty() and marker_er != child_element_ref:
+			continue
+		var marker_pos: Array = marker.get("position", [])
+		if marker_pos.size() == 3 and child_pos.size() == 3:
+			var matched: bool = true
+			for i in 3:
+				if abs(float(marker_pos[i]) - float(child_pos[i])) > 0.001:
+					matched = false
+					break
+			if matched:
+				return true
+		elif marker_pos.is_empty() and not marker_er.is_empty():
+			# Marker has element_ref but no position — wildcard match on
+			# element_ref alone. Used when deleting an entire family of
+			# duplicates (rare; explicit position is the default).
+			return true
+	return false
 
 
 ## Set a direct block property from a string key.
