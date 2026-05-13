@@ -58,8 +58,17 @@ const LAYER_MAP := {
 }
 
 
-## Load and parse a .block.json file. Returns the raw Dictionary.
-## Returns empty dict on failure.
+## Load and parse a block/element/assembly JSON file. Returns the raw Dictionary
+## in the LEGACY shape (with `format_version`, `identity`, top-level `collision`
+## etc.) regardless of whether the file on disk uses the legacy `.block.json`
+## schema or the unified `world-node-v1` schema. Returns empty dict on failure.
+##
+## Unified-schema files are detected by `$schema == "world-node-v1"` OR by the
+## presence of `type` + `properties` (and absence of `block_type`). They get
+## translated through `_unified_to_legacy_dict()` so the rest of this module
+## (file_to_block, file_to_assembly, apply_overrides) keeps working unchanged.
+## This is the bridge that lets the new `assets/world/` data tree drive the
+## existing renderer without rewriting BlocksFactory.
 ##
 ## In editor / dev builds we read via the OS path (ProjectSettings.globalize_
 ## path) to bypass Godot's resource-system cache — the Studio hot-reload path
@@ -88,6 +97,12 @@ static func load_file(path: String) -> Dictionary:
 		return {}
 
 	var data: Dictionary = json.data
+	# Unified schema detection: `world-node-v1` files use top-level `type` +
+	# `properties`. Translate to the legacy shape so the rest of the module
+	# operates on a single canonical form. The unified files don't carry
+	# `format_version`, so detect FIRST then convert before the legacy check.
+	if _is_unified_dict(data):
+		data = _unified_to_legacy_dict(data)
 	if not data.has("format_version"):
 		push_error("[BlockFile] Missing required field (format_version) in %s" % path)
 		return {}
@@ -95,8 +110,91 @@ static func load_file(path: String) -> Dictionary:
 	return data
 
 
+## True when `data` looks like a unified-schema file (world-node-v1).
+## Identified by `$schema == "world-node-v1"` OR by `type` + `properties`
+## present together AND no `block_type` discriminator. Defensive: keeps
+## legacy_block files from being mis-routed even if they happen to grow a
+## `type` field in some future schema bump.
+static func _is_unified_dict(data: Dictionary) -> bool:
+	if data.has("block_type"):
+		return false
+	if str(data.get("$schema", "")) == "world-node-v1":
+		return true
+	return data.has("type") and data.has("properties")
+
+
+## Translate a unified-schema dict into the legacy `.block.json` shape so
+## file_to_block / file_to_assembly can consume it without modification.
+##
+## Element translation:
+##   unified: { type, id, name, tags, properties: {category, description,
+##               collision, visual, audio, blend, placement, lod, neuron,
+##               light, validators} }
+##   legacy:  { format_version, block_type, identity: {name, category, tags,
+##               description}, collision, visual, audio, blend, placement,
+##               lod, neuron, light, validators }
+##
+## Assembly translation: same identity translation as element, plus the
+## children array is re-shaped from the unified flat form back to the
+## legacy `element_ref` + `placement` wrapping. Per-child keys translated:
+##   ref → element_ref
+##   position / rotation_y / scale_factor → placement.{position, rotation_y, scale_factor}
+##   overrides, blend, light, child_overrides, extra_children — passed through
+##   identity.name carried over when `id` is present (used by save path for
+##   stable child lookups).
+static func _unified_to_legacy_dict(unified: Dictionary) -> Dictionary:
+	var legacy := {}
+	legacy["format_version"] = "1.0"
+	var type_str := str(unified.get("type", ""))
+	if type_str == "assembly":
+		legacy["block_type"] = "assembly"
+	else:
+		legacy["block_type"] = "element"
+	var props: Dictionary = unified.get("properties", {}) as Dictionary
+	# Build the legacy identity block from top-level name/tags + props.category/description.
+	var identity := {
+		"name": str(unified.get("name", unified.get("id", ""))),
+		"category": str(props.get("category", "prop")),
+		"tags": (unified.get("tags", []) as Array).duplicate(),
+		"description": str(props.get("description", "")),
+	}
+	legacy["identity"] = identity
+	# Pull renderer-relevant subsections from properties up to top level.
+	for key in ["collision", "visual", "audio", "blend", "placement", "lod",
+			"neuron", "light", "validators"]:
+		if props.has(key):
+			legacy[key] = props[key]
+	# Pass through any other top-level legacy fields the unified file may carry
+	# verbatim (e.g. _source_path used internally by Studio hot-reload).
+	for k in ["_source_path"]:
+		if unified.has(k):
+			legacy[k] = unified[k]
+	# Assembly: re-shape each child via the shared normalizer so a unified
+	# `ref + position + rotation_y` entry becomes a legacy
+	# `element_ref + placement.{position, rotation_y}` entry. Same helper as
+	# the per-child path in file_to_assembly, ensuring consistent behavior.
+	if type_str == "assembly":
+		var legacy_children: Array = []
+		for raw in unified.get("children", []):
+			if not raw is Dictionary:
+				continue
+			legacy_children.append(_normalize_child_to_legacy(raw as Dictionary))
+		legacy["children"] = legacy_children
+	return legacy
+
+
 ## Convert an element block-file dict into a Block instance.
+##
+## Accepts either schema:
+##   - legacy `.block.json` shape (identity{}, top-level collision/visual/...)
+##   - unified `world-node-v1` shape (top-level name/tags, properties{})
+## A unified dict is auto-translated via _unified_to_legacy_dict so the rest
+## of this function operates on a single canonical form. This means callers
+## that bypass load_file() (e.g. tests, in-memory fixtures) still get the
+## same behavior whether they pass unified or legacy data.
 static func file_to_block(data: Dictionary) -> Block:
+	if _is_unified_dict(data):
+		data = _unified_to_legacy_dict(data)
 	var block := Block.new()
 
 	# Identity
@@ -271,6 +369,14 @@ static func file_to_block(data: Dictionary) -> Block:
 static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 		child_overrides: Dictionary = {}, extra_children: Array = [],
 		deleted_children: Array = []) -> Array[Block]:
+	# Accept either schema. A unified dict (no `block_type`, has `properties`)
+	# is translated to the legacy shape so the children-iteration logic below
+	# can read `element_ref` + `placement.position` consistently regardless of
+	# how the dict was originally authored. Defensive at this boundary because
+	# callers (tests, in-memory fixtures, hot-reload paths) may bypass
+	# load_file() and hand us raw JSON directly.
+	if _is_unified_dict(data):
+		data = _unified_to_legacy_dict(data)
 	var blocks: Array[Block] = []
 
 	# Create assembly root block (no visual, just a container)
@@ -328,6 +434,11 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 			child_def = src as Dictionary
 		else:
 			child_def = children[child_def_idx]
+		# Per-child normalization: callers may hand us hybrid dicts that mix
+		# unified keys (`ref`, flat `position`/`rotation_y`) with legacy keys
+		# (`placement.*`). Normalize so the rest of this loop only reads the
+		# legacy spelling. Idempotent on already-legacy entries.
+		child_def = _normalize_child_to_legacy(child_def)
 		# Pattern expansion: one JSON entry → many positioned children
 		var expanded: Array = []
 		var is_pattern: bool = child_def.has("pattern")
@@ -473,15 +584,27 @@ static func apply_overrides(block: Block, overrides: Dictionary) -> void:
 			_set_block_dotted(block, parts[0], parts[1], value)
 
 
-## Resolve an element_ref path to the actual .block.json file path.
-## Searches through provided search paths in order.
+## Resolve an element_ref path to the actual element file on disk.
+##
+## Search order per base path:
+##   1. <base>/<ref>.json           (unified `world-node-v1` schema; canonical)
+##   2. <base>/<ref>.block.json     (legacy extension; fallback safety net)
+##
+## The unified extension wins when both exist. The `.block.json` fallback is
+## kept only as a safety net for any in-flight callers that might still pass
+## a legacy filename — the actual data tree is `assets/world/` after Phase 5.
 static func resolve_element_path(ref: String, search_paths: PackedStringArray) -> String:
-	# ref format: "tree/trunk_small" -> looks for "tree/trunk_small.block.json"
-	var filename := ref + ".block.json"
+	# ref format: "tree/trunk_small" -> tries "tree/trunk_small.json" first,
+	# then falls back to "tree/trunk_small.block.json".
+	var unified_filename := ref + ".json"
+	var legacy_filename := ref + ".block.json"
 	for base_path in search_paths:
-		var full_path := base_path.path_join(filename)
-		if FileAccess.file_exists(full_path):
-			return full_path
+		var unified_path := base_path.path_join(unified_filename)
+		if FileAccess.file_exists(unified_path):
+			return unified_path
+		var legacy_path := base_path.path_join(legacy_filename)
+		if FileAccess.file_exists(legacy_path):
+			return legacy_path
 	return ""
 
 
@@ -495,6 +618,61 @@ static func _arr_to_vec3(arr) -> Vector3:
 	if arr is Array and arr.size() >= 3:
 		return Vector3(float(arr[0]), float(arr[1]), float(arr[2]))
 	return Vector3.ZERO
+
+
+## Normalize a single child entry to the legacy shape. Idempotent: an entry
+## already in legacy form passes through unchanged. Used inside the assembly
+## children loop so the rest of the code can read one canonical layout
+## regardless of whether the caller handed us unified, legacy, or hybrid
+## (post-COPY) data.
+##
+## Translations applied:
+##   ref → element_ref
+##   flat position → placement.position
+##   flat rotation_y (degrees) → placement.rotation_y (radians)
+##   flat scale_factor → placement.scale_factor
+##   id → overrides.identity.name (when overrides lacks an explicit name)
+static func _normalize_child_to_legacy(child: Dictionary) -> Dictionary:
+	if not child is Dictionary:
+		return child
+	# Fast path: no unified-only keys → nothing to do.
+	var has_unified_keys: bool = child.has("ref") or child.has("position") \
+			or child.has("rotation_y") or child.has("scale_factor")
+	if not has_unified_keys:
+		return child
+	# Build a normalized COPY (don't mutate input — callers may hold the original).
+	var out: Dictionary = child.duplicate(true)
+	if out.has("ref") and not out.has("element_ref"):
+		out["element_ref"] = out["ref"]
+		out.erase("ref")
+	# Promote flat placement keys into placement{}. Convert rotation_y deg→rad
+	# because the unified schema authors rotations in degrees (per
+	# WorldParser.parse_unified docs) while the legacy renderer expects rad.
+	var placement: Dictionary = out.get("placement", {})
+	if not placement is Dictionary:
+		placement = {}
+	if out.has("position") and not placement.has("position"):
+		placement["position"] = out["position"]
+		out.erase("position")
+	if out.has("rotation_y") and not placement.has("rotation_y"):
+		placement["rotation_y"] = deg_to_rad(float(out["rotation_y"]))
+		out.erase("rotation_y")
+	if out.has("scale_factor") and not placement.has("scale_factor"):
+		placement["scale_factor"] = out["scale_factor"]
+		out.erase("scale_factor")
+	if not placement.is_empty():
+		out["placement"] = placement
+	# Migrate flat `id` into overrides.identity.name so the stable-handle
+	# lookups in file_to_assembly still resolve correctly.
+	if out.has("id"):
+		var overrides: Dictionary = out.get("overrides", {})
+		if not overrides is Dictionary:
+			overrides = {}
+		if not overrides.has("identity.name"):
+			overrides["identity.name"] = str(out["id"])
+		out["overrides"] = overrides
+		out.erase("id")
+	return out
 
 
 ## True if `child_def` matches any marker in `deleted_children`. Markers are
