@@ -564,7 +564,19 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 				if pi_placement.has("position"):
 					child_block.position = world_pos + _arr_to_vec3(pi_placement["position"])
 				if pi_placement.has("rotation_y"):
-					child_block.rotation_y = pi_placement["rotation_y"]
+					# Rotation-unit handling for child_overrides:
+					# Historically the JSON stored radians (hand-authored:
+					# -1.5716 ≈ -90°, -0.1047 ≈ -6°). The Design Studio save
+					# path writes degrees (90.0, 135.0, 180.0). Both shapes
+					# coexist in the live data. block.rotation_y expects
+					# radians (Godot's `rotation.y` is radians).
+					# Heuristic: |value| > 2π (≈6.283) is unambiguously
+					# degrees — radians for a single Y-rotation never exceed
+					# τ. Below that, assume radians. Edge case of a sub-
+					# 6.28° intended-degrees rotation maps to ~0° rendered —
+					# imperceptible, no user-visible regression.
+					var rot_raw: float = float(pi_placement["rotation_y"])
+					child_block.rotation_y = deg_to_rad(rot_raw) if abs(rot_raw) > TAU else rot_raw
 				if pi_placement.has("scale_factor"):
 					child_block.scale_factor = pi_placement["scale_factor"]
 				var pi_raw_overrides = per_instance.get("overrides", {})
