@@ -543,14 +543,32 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 			# overrides; placement.position is interpreted as the new local
 			# position relative to the assembly origin (we re-add world_pos).
 			if not per_instance.is_empty():
-				var pi_placement: Dictionary = per_instance.get("placement", {})
+				# `placement` may be missing or — if a faulty save serialized
+				# it as a string `"{...}"` — non-dict. Defensive: a malformed
+				# entry should warn loudly and skip its per-instance fields
+				# rather than crash the whole assembly load. The structure
+				# JSON may still carry a flat `position`/`rotation_y` at the
+				# per_instance level (sibling to `placement`), which we treat
+				# as a fallback so the salvageable data still lands.
+				var pi_raw_placement = per_instance.get("placement", {})
+				var pi_placement: Dictionary = {}
+				if pi_raw_placement is Dictionary:
+					pi_placement = pi_raw_placement as Dictionary
+				else:
+					push_warning("[BlockFile] per-instance 'placement' is not a Dictionary in %s (got %s) — skipping placement override for this child" % [
+						root.block_name, typeof(pi_raw_placement)])
+				if per_instance.has("position") and not pi_placement.has("position"):
+					pi_placement["position"] = per_instance["position"]
+				if per_instance.has("rotation_y") and not pi_placement.has("rotation_y"):
+					pi_placement["rotation_y"] = per_instance["rotation_y"]
 				if pi_placement.has("position"):
 					child_block.position = world_pos + _arr_to_vec3(pi_placement["position"])
 				if pi_placement.has("rotation_y"):
 					child_block.rotation_y = pi_placement["rotation_y"]
 				if pi_placement.has("scale_factor"):
 					child_block.scale_factor = pi_placement["scale_factor"]
-				var pi_overrides: Dictionary = per_instance.get("overrides", {})
+				var pi_raw_overrides = per_instance.get("overrides", {})
+				var pi_overrides: Dictionary = pi_raw_overrides as Dictionary if pi_raw_overrides is Dictionary else {}
 				if not pi_overrides.is_empty():
 					apply_overrides(child_block, pi_overrides)
 
