@@ -271,7 +271,16 @@ static func get_material(material_id: String) -> Material:
 
 	var mat: Material
 	if color.a < 1.0:
-		# Transparent — must use StandardMaterial3D for alpha blending
+		# Transparent — must use StandardMaterial3D for alpha blending.
+		# V23 attempted TRANSPARENCY_ALPHA_HASH and ALPHA_DEPTH_PRE_PASS to
+		# stabilize depth sorting on Nvidia, but both produce visible dithering
+		# artifacts on the relatively-transparent glass (alpha=0.5) and water
+		# (alpha=0.7) — worse than the original subtle sort flicker. Reverted
+		# to the original TRANSPARENCY_ALPHA + render_priority + no-depth-write
+		# config. Glass + water render smoothly; the residual depth-sort
+		# flicker between adjacent transparent surfaces is a separate problem
+		# that requires geometry-level or sorting-priority work, not a
+		# material-level fix.
 		var std := StandardMaterial3D.new()
 		std.albedo_color = color
 		std.roughness = rough
