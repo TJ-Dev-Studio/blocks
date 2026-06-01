@@ -229,7 +229,13 @@ static func file_to_block(data: Dictionary) -> Block:
 	# since block.rotation_y is consumed as radians (Godot's rotation.y).
 	var placement: Dictionary = props.get("placement", {}) as Dictionary
 	block.position = _arr_to_vec3(placement.get("position", [0, 0, 0]))
-	block.rotation_y = deg_to_rad(float(placement.get("rotation_y", 0.0)))
+	var _pl_rot = placement.get("rotation", null)
+	if _pl_rot is Array and _pl_rot.size() == 3:
+		block.rotation_x = deg_to_rad(float(_pl_rot[0]))
+		block.rotation_y = deg_to_rad(float(_pl_rot[1]))
+		block.rotation_z = deg_to_rad(float(_pl_rot[2]))
+	else:
+		block.rotation_y = deg_to_rad(float(placement.get("rotation_y", 0.0)))
 	block.scale_factor = float(placement.get("scale_factor", 1.0))
 
 	# LOD / Cellular
@@ -414,7 +420,12 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 				child_block.position = world_pos + _arr_to_vec3(effective_child["position"])
 			else:
 				child_block.position = child_block.position + world_pos
-			if effective_child.has("rotation_y"):
+			var _ec_rot = effective_child.get("rotation", null)
+			if _ec_rot is Array and _ec_rot.size() == 3:
+				child_block.rotation_x = deg_to_rad(float(_ec_rot[0]))
+				child_block.rotation_y = deg_to_rad(float(_ec_rot[1]))
+				child_block.rotation_z = deg_to_rad(float(_ec_rot[2]))
+			elif effective_child.has("rotation_y"):
 				child_block.rotation_y = deg_to_rad(float(effective_child["rotation_y"]))
 			if effective_child.has("scale_factor"):
 				child_block.scale_factor = float(effective_child["scale_factor"])
@@ -457,7 +468,12 @@ static func file_to_assembly(data: Dictionary, element_resolver: Callable,
 			if not per_instance.is_empty():
 				if per_instance.has("position"):
 					child_block.position = world_pos + _arr_to_vec3(per_instance["position"])
-				if per_instance.has("rotation_y"):
+				var _pi_rot = per_instance.get("rotation", null)
+				if _pi_rot is Array and _pi_rot.size() == 3:
+					child_block.rotation_x = deg_to_rad(float(_pi_rot[0]))
+					child_block.rotation_y = deg_to_rad(float(_pi_rot[1]))
+					child_block.rotation_z = deg_to_rad(float(_pi_rot[2]))
+				elif per_instance.has("rotation_y"):
 					child_block.rotation_y = deg_to_rad(float(per_instance["rotation_y"]))
 				if per_instance.has("scale_factor"):
 					child_block.scale_factor = float(per_instance["scale_factor"])

@@ -130,6 +130,11 @@ extends Resource
 ## Y-axis rotation in radians.
 @export var rotation_y: float = 0.0
 
+## X / Z axis rotation in radians — full per-element tilt. 0 = upright.
+## Kept as separate fields so all existing Y-only callers stay unaffected.
+@export var rotation_x: float = 0.0
+@export var rotation_z: float = 0.0
+
 ## Uniform scale factor.
 @export var scale_factor: float = 1.0
 

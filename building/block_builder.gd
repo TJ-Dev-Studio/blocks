@@ -15,7 +15,9 @@ static func build(block: Block, parent: Node3D) -> Node3D:
 	var root := Node3D.new()
 	root.name = block.block_name if not block.block_name.is_empty() else block.block_id
 	root.position = block.position
-	root.rotation.y = block.rotation_y
+	# Full per-element rotation. rotation_x/z default to 0, so Y-only blocks are
+	# byte-identical to the old `root.rotation.y = block.rotation_y`.
+	root.rotation = Vector3(block.rotation_x, block.rotation_y, block.rotation_z)
 	if not is_equal_approx(block.scale_factor, 1.0):
 		root.scale = Vector3.ONE * block.scale_factor
 
