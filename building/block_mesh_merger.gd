@@ -222,6 +222,18 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 ## to an Array of blocked normal directions (Vector3) for that entry.
 ##
 ## Only processes SHAPE_BOX entries — cylinders, spheres, ramps are skipped.
+## True when the basis maps each local axis onto a world axis (axis-aligned box).
+## Rotated boxes get a wrong origin±half_size AABB, so face-culling must skip them
+## or they falsely cull a neighbour's visible face (collidable-but-invisible blocks).
+static func _basis_is_axis_aligned(b: Basis) -> bool:
+	var o: Basis = b.orthonormalized()
+	for v: Vector3 in [o.x, o.y, o.z]:
+		var a: Vector3 = v.abs()
+		if maxf(a.x, maxf(a.y, a.z)) < 0.9995:
+			return false
+	return true
+
+
 static func _find_culled_faces(meshes: Array) -> Dictionary:
 	# culled[entry_index] = Array[Vector3] of blocked normal directions
 	var culled: Dictionary = {}
@@ -238,6 +250,14 @@ static func _find_culled_faces(meshes: Array) -> Dictionary:
 			continue
 		var mesh: Mesh = entry["mesh"]
 		if not mesh is BoxMesh:
+			aabb_data[i] = null
+			continue
+		# Rotation guard: the AABB below is origin ± half_size, which is valid ONLY
+		# for axis-aligned boxes. A rotated box (e.g. a ramp landing slab authored at
+		# 26.565°) gets a WRONG AABB and can falsely cull a neighbour's *visible* face,
+		# leaving collidable-but-invisible geometry. Skip culling for non-axis-aligned
+		# boxes — treat like a non-box: never a cull source or target.
+		if not _basis_is_axis_aligned(entry["transform"].basis):
 			aabb_data[i] = null
 			continue
 		var box_mesh: BoxMesh = mesh as BoxMesh
