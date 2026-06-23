@@ -116,6 +116,10 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 			continue  # skip scene visuals — only merge primitives
 		if not block.materials_list.is_empty():
 			continue  # multi-material blocks rendered individually — cannot merge different surface materials
+		if block.interaction == BlockCategories.INTERACT_WALKABLE:
+			continue  # walkable platforms/landings render INDIVIDUALLY — never merge or
+			# face-cull a surface the player stands on (they were vanishing into the
+			# merged mesh while their collision survived → walkable-but-invisible)
 
 		var mesh_inst := block.node.get_node_or_null("Mesh") as MeshInstance3D
 		if mesh_inst == null or mesh_inst.mesh == null:
@@ -316,8 +320,11 @@ static func _find_culled_faces(meshes: Array) -> Dictionary:
 					normal_pos[axis] = 1.0
 					var normal_neg := Vector3.ZERO
 					normal_neg[axis] = -1.0
-					# Only cull A's face if B covers enough of it
-					if a_covered:
+					# Only cull A's face if B covers enough of it — but NEVER cull an
+					# upward (+Y) face. Walkable platforms/landings/decks rest flush
+					# against neighbours; culling their top leaves them collidable but
+					# invisible (the horde ramp/landing slabs vanished this way).
+					if a_covered and axis != 1:
 						if not culled.has(i):
 							culled[i] = []
 						culled[i].append(normal_pos)
@@ -333,7 +340,8 @@ static func _find_culled_faces(meshes: Array) -> Dictionary:
 					normal_pos[axis] = 1.0
 					var normal_neg := Vector3.ZERO
 					normal_neg[axis] = -1.0
-					if b_covered:
+					# NEVER cull an upward (+Y) face — see note above.
+					if b_covered and axis != 1:
 						if not culled.has(j):
 							culled[j] = []
 						culled[j].append(normal_pos)
