@@ -62,6 +62,11 @@ const TEXTURED_MATERIALS: Dictionary = {
 	"concrete": "res://assets/textures/blocks/brick/brick_a.png",
 	"wood_dark": "res://assets/textures/blocks/wood_dark/wood_dark_a.png",
 	"metal_dark": "res://assets/textures/blocks/metal_dark/metal_dark_a.png",
+	# Bog Colossus — Forge-generated mossy swamp stone (rough ORGANIC rock, not a
+	# brick/cobblestone grid). Used by assets/world/assemblies/boss/bog_colossus.json.
+	"bog_stone": "res://assets/textures/blocks/bog_stone/bog_stone_a.png",
+	"bog_moss": "res://assets/textures/blocks/bog_moss/bog_moss_a.png",
+	"bog_stone_dark": "res://assets/textures/blocks/bog_stone_dark/bog_stone_dark_a.png",
 }
 
 ## Per-material switch: should the textured shader use plain UV mapping
@@ -83,6 +88,10 @@ const TEXTURED_USE_TRIPLANAR: Dictionary = {
 	"concrete": false,
 	"wood_dark": false,
 	"metal_dark": false,
+	# Colossus is built from spheres/domes/capsules — triplanar avoids UV stretch.
+	"bog_stone": true,
+	"bog_moss": true,
+	"bog_stone_dark": true,
 }
 
 ## Per-material scalar tiling for the block_world shader's
@@ -96,6 +105,10 @@ const TEXTURED_SCALE_OVERRIDES: Dictionary = {
 	"stone_gray":  12.0,
 	"stone_light": 12.0,
 	"concrete":    9.0,
+	# Big rock chunks for the giant — low scale = larger pattern per part.
+	"bog_stone":      0.2,
+	"bog_moss":       0.32,
+	"bog_stone_dark": 0.22,
 }
 
 ## Per-material U:V aspect override for textures whose painted pattern is
@@ -154,6 +167,10 @@ const PALETTE := {
 	"stone": Color(0.4, 0.38, 0.35),
 	"concrete": Color(0.667, 0.667, 0.667),
 	"brick": Color(0.6, 0.3, 0.2),
+	# Bog Colossus mossy stone — fallback tints if the textured PNG fails to load.
+	"bog_stone": Color(0.5, 0.52, 0.46),
+	"bog_moss": Color(0.3, 0.5, 0.25),
+	"bog_stone_dark": Color(0.24, 0.27, 0.22),
 
 	# Paint / manufactured
 	"red": Color(0.8, 0.133, 0.133),
