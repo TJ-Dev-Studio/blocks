@@ -94,6 +94,17 @@ const TEXTURED_USE_TRIPLANAR: Dictionary = {
 	"bog_stone_dark": true,
 }
 
+## Per-material toggle for OBJECT/LOCAL-space triplanar (block_world.gdshader
+## use_local_space_triplanar). True welds the texture to the mesh so it does NOT
+## swim when the object MOVES or ROTATES — required for the walking Bog Colossus.
+## Only meaningful when use_triplanar_uv is also true. Default false keeps the
+## world-space tiling that static world blocks rely on.
+const TEXTURED_USE_LOCAL_SPACE: Dictionary = {
+	"bog_stone": true,
+	"bog_moss": true,
+	"bog_stone_dark": true,
+}
+
 ## Per-material scalar tiling for the block_world shader's
 ## albedo_texture_scale uniform (float). Higher = more tiling = smaller
 ## pattern. Materials not listed fall back to TEXTURED_DEFAULT_SCALE.
@@ -530,6 +541,9 @@ static func _get_textured_material(palette_key: String, texture_path: String) ->
 	# trunks, sphere canopies) where plain UV would stretch.
 	smat.set_shader_parameter("use_triplanar_uv",
 			bool(TEXTURED_USE_TRIPLANAR.get(palette_key, true)))
+	# Object-space triplanar locks the texture to moving meshes (walking boss).
+	smat.set_shader_parameter("use_local_space_triplanar",
+			bool(TEXTURED_USE_LOCAL_SPACE.get(palette_key, false)))
 	if shader_param_injector.is_valid():
 		shader_param_injector.call(palette_key, smat)
 
