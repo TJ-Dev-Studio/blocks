@@ -25,7 +25,7 @@ addons/blocks/  (or repo root)
 │
 ├── building/                   Block Resource → Node3D subtree
 │   ├── block_builder.gd        Mesh + collision shape factory
-│   ├── block_materials.gd      Material palette + cache (38 colors)
+│   ├── block_materials.gd      Material cache + register_materials() seam (headless; game supplies palette/textures/shaders)
 │   ├── block_visuals.gd        Runtime emission/color + color chain animation
 │   ├── block_mesh_merger.gd    Same-material mesh merging (draw call reduction)
 │   ├── block_mesh_modifiers.gd Vertex displacement (noise, organic shaping)
@@ -83,16 +83,33 @@ lod/          ← depends on registry/ (BlockRegistry)
 4. Run tests
 
 ### New Material
-1. Add to `PALETTE` dictionary in `building/block_materials.gd` (for library defaults)
-2. OR set `BlockMaterials.palette_override["my_mat"] = Color(...)` from your game's style autoload
-3. Use `material_id` key in block JSON
+The library is **headless** — it ships no game art. A game registers its material
+identity once at startup (before any block builds). To add a material:
+1. Add it to your **game's** material library and pass it through
+   `BlockMaterials.register_materials({...})` (palette / roughness / textured /
+   shaders / material_type_map). In FrogMog that's `scripts/autoload/block_style.gd`.
+2. For a one-off **library default** (e.g. a new demo/test material used by the
+   suites in `tests/`), add it to the generic baseline `PALETTE`/`ROUGHNESS` in
+   `building/block_materials.gd`.
+3. For a per-map runtime tweak, set `BlockMaterials.palette_override["my_mat"] = Color(...)`.
+4. Use the `material_id` key in block JSON.
 
-### Game-Specific Style
-The library's visual output is fully customizable via `BlockMaterials` static extension points:
-- `palette_override` / `roughness_override` — Dictionary overrides merged on top of built-in constants
-- `shader_param_injector` — Callable to inject textures/uniforms into every ShaderMaterial
+### Game-Specific Style (the headless seam)
+The library ships only a generic demo baseline + diagnostics. A game injects its
+full visual identity through `BlockMaterials`, from an autoload that runs **before
+BlocksFactory** (FrogMog: `scripts/autoload/block_style.gd`):
+- `register_materials({palette, roughness, textured, triplanar, local_space,`
+  `scale_overrides, aspect_overrides, material_type_map, shader_path,`
+  `proc_shader_path})` — the **primary seam**. Merges the game's palette/roughness
+  onto the baseline, supplies the hand-painted texture set + its tiling tuning, and
+  registers the block-world shaders. Calls `clear_caches()` so it's hot-reload safe.
+- `BlockBuilder.organic_mesh_dir` — directory of pre-baked arch/rock `.tres` meshes
+  (empty → procedural torus/sphere fallback). Also injected, no asset paths in the engine.
+- `palette_override` / `roughness_override` — per-map runtime overrides, checked
+  *before* the registered palette (e.g. a map recoloring `stone` for its biome).
+- `shader_param_injector` — Callable to inject textures/uniforms into every ShaderMaterial.
 - `material_post_processor` — Callable to add next_pass (outlines), replace materials, etc.
-Register these in a game autoload that runs before BlocksFactory. See README.md for full example.
+See README.md for a full example.
 
 ### New Placement Rule
 1. Create `rules/my_rule.gd` extending `BlockPlacementRule`
@@ -113,7 +130,7 @@ Register these in a game autoload that runs before BlocksFactory. See README.md 
 | Symptom | Domain to check |
 |---------|----------------|
 | Block doesn't appear | `building/block_builder.gd` — check shape/material |
-| Block appears wrong color | `building/block_materials.gd` — check PALETTE key |
+| Block appears wrong color / default gray | Check the game's `register_materials()` (FrogMog: `block_style.gd`) — the engine only ships generic demo defaults; production palette/textures are injected |
 | Validation rejects block | `registry/block_validator.gd` — check which stage fails |
 | Block not found by query | `registry/block_registry.gd` — check spatial grid cell |
 | Connections not forming | `rules/block_auto_connector.gd` or specific rule in `rules/` |
