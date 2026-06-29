@@ -86,7 +86,7 @@ static func make_rock_mesh(radius: float, seed_val: int,
 ## Generate all organic mesh .tres files and save to res://assets/meshes/organic/.
 ## Call once from editor or headless runner — not at runtime.
 static func generate_all() -> void:
-	var base_path := "res://assets/meshes/organic"
+	var base_path := BlockBuilder.organic_mesh_dir if not BlockBuilder.organic_mesh_dir.is_empty() else "res://assets/meshes/organic"
 
 	# 3 arch sizes: inner_r, outer_r → filename suffix {inner*100}_{outer*100}
 	var arch_sizes: Array[Array] = [

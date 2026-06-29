@@ -5,6 +5,12 @@ class_name BlockBuilder
 ## Handles StaticBody3D vs Area3D selection, collision layer bitmasks,
 ## shape creation, material application, and metadata tagging.
 
+## Directory of pre-baked organic meshes (arch/rock .tres). INJECTED by the game
+## (empty by default → arch/rock blocks fall back to a procedural torus/sphere),
+## so the library ships no game asset paths. Set once at startup from a game
+## style autoload; BlockShapeGen.generate_all() writes its meshes here too.
+static var organic_mesh_dir: String = ""
+
 ## Build a Node3D subtree from a Block definition and attach to parent.
 ## Returns the root Node3D.
 static func build(block: Block, parent: Node3D) -> Node3D:
@@ -188,7 +194,7 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 		BlockCategories.SHAPE_ARCH:
 			# Load pre-generated half-torus mesh (STATE.md: no runtime SurfaceTool)
 			var arch_key := "arch_%d_%d" % [int(dims.x * 100), int(dims.y * 100)]
-			var arch_path := "res://assets/meshes/organic/%s.tres" % arch_key
+			var arch_path := "%s/%s.tres" % [organic_mesh_dir, arch_key]
 			var arch_mesh: Mesh = load(arch_path) as Mesh
 			if arch_mesh:
 				mi.mesh = arch_mesh
@@ -206,7 +212,7 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 			var rock_seed := int(dims.z) if dims.z > 0.0 else 0
 			var rock_radius := int(dims.x * 100)
 			var rock_key := "rock_s%d_r%d" % [rock_seed, rock_radius]
-			var rock_path := "res://assets/meshes/organic/%s.tres" % rock_key
+			var rock_path := "%s/%s.tres" % [organic_mesh_dir, rock_key]
 			var rock_mesh: Mesh = load(rock_path) as Mesh
 			if rock_mesh:
 				mi.mesh = rock_mesh

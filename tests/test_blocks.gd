@@ -22,6 +22,14 @@ func _ready() -> void:
 	print("=" .repeat(60))
 	print("")
 
+	# The blocks library is headless — it ships no game asset paths. Register the
+	# host project's block shaders so the material tests exercise the real
+	# ShaderMaterial path (override/tint/procedural dispatch) rather than the
+	# StandardMaterial3D fallback. (Production registers these from BlockStyle.)
+	BlockMaterials.shader_path = "res://assets/shaders/block_world.gdshader"
+	BlockMaterials.proc_shader_path = "res://assets/shaders/block_world_procedural.gdshader"
+	BlockBuilder.organic_mesh_dir = "res://assets/meshes/organic"
+
 	# Create a local registry instance (not the autoload — standalone test)
 	_registry = BlockRegistry.new()
 	_registry.name = "TestRegistry"
