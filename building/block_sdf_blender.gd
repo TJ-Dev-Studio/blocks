@@ -161,7 +161,6 @@ static func _marching_cubes(grid: PackedFloat32Array, aabb: AABB, res: int) -> A
 	var n := res + 1
 	var cell: Vector3 = aabb.size / float(res)
 	var verts: PackedVector3Array
-	var norms: PackedVector3Array
 
 	for zi in range(res):
 		for yi in range(res):
@@ -212,10 +211,13 @@ static func _marching_cubes(grid: PackedFloat32Array, aabb: AABB, res: int) -> A
 					var p0: Vector3 = ev[e0]
 					var p1: Vector3 = ev[_TRI_TABLE[ti + j + 1]]
 					var p2: Vector3 = ev[_TRI_TABLE[ti + j + 2]]
-					var n_vec: Vector3 = (p2 - p0).cross(p1 - p0).normalized()
-					verts.append(p0); norms.append(n_vec)
-					verts.append(p2); norms.append(n_vec)
-					verts.append(p1); norms.append(n_vec)
+					# Snap to a fine grid so coincident edge vertices from neighbouring
+					# cubes become bit-identical → SurfaceTool.index() welds them →
+					# generate_normals() can average into smooth normals (no flat facets).
+					var sn := Vector3(0.02, 0.02, 0.02)
+					verts.append(p0.snapped(sn))
+					verts.append(p2.snapped(sn))
+					verts.append(p1.snapped(sn))
 					j += 3
 
 	if verts.is_empty():
@@ -224,9 +226,9 @@ static func _marching_cubes(grid: PackedFloat32Array, aabb: AABB, res: int) -> A
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for i in range(verts.size()):
-		st.set_normal(norms[i])
 		st.add_vertex(verts[i])
-	st.index()
+	st.index()              # weld coincident verts so faces share vertices
+	st.generate_normals()   # smooth per-vertex normals — removes the flat-facet "lines"
 	return st.commit()
 
 
