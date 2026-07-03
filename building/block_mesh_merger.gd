@@ -171,9 +171,29 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		for i: int in range(meshes.size()):
 			var entry: Dictionary = meshes[i]
 			if culled_faces.has(i):
-				# Selective copy — skip triangles facing blocked directions
+				# Selective copy — skip triangles facing blocked directions.
+				#
+				# The surviving triangles MUST go through their own SurfaceTool
+				# and re-enter `st` via append_from. Feeding add_vertex() calls
+				# into a SurfaceTool that has already ingested indexed geometry
+				# via append_from() leaves those vertices ORPHANED — they land in
+				# ARRAY_VERTEX but no triangle index ever references them, so the
+				# whole entry silently vanishes from the render while its
+				# collision survives (store walls invisible-but-solid, 2026-07-03).
+				var sub := SurfaceTool.new()
+				sub.begin(Mesh.PRIMITIVE_TRIANGLES)
 				total_faces_culled += _append_with_culling(
-					st, entry["mesh"], entry["transform"], culled_faces[i])
+					sub, entry["mesh"], entry["transform"], culled_faces[i])
+				# index() converts the raw add_vertex stream to an indexed
+				# surface — append_from() only splices sources whose indexing
+				# matches the destination tool (BoxMesh surfaces are indexed);
+				# a non-indexed source gets its vertices copied but no indices,
+				# recreating the orphaning this block exists to avoid.
+				sub.index()
+				var sub_mesh: ArrayMesh = sub.commit()
+				if sub_mesh != null and sub_mesh.get_surface_count() > 0:
+					# Vertices were already transformed by _append_with_culling.
+					st.append_from(sub_mesh, 0, Transform3D.IDENTITY)
 			else:
 				# No faces to cull — use fast path
 				st.append_from(entry["mesh"], 0, entry["transform"])
