@@ -104,9 +104,16 @@ const LAYER_MAP := {
 ## needs each parse to see current bytes on disk, not a snapshot from
 ## game-launch time. Falls back to the original path for packaged builds
 ## where files live inside the .pck archive.
+##
+## globalize_path is SKIPPED entirely on Android/iOS: on a packaged mobile
+## export it does not fail (return null) the way the "falls back to res://"
+## comment above assumes — it silently strips the "res://" prefix and hands
+## back a bare relative path. FileAccess.open() on that path succeeds (non-
+## null) but reads zero bytes, so every block/assembly JSON on device parsed
+## as empty. Confirmed on-device 2026-07-03 (Android) via targeted logging.
 static func load_file(path: String) -> Dictionary:
 	var disk_path: String = path
-	if path.begins_with("res://"):
+	if path.begins_with("res://") and OS.get_name() not in ["Android", "iOS"]:
 		disk_path = ProjectSettings.globalize_path(path)
 	var file := FileAccess.open(disk_path, FileAccess.READ)
 	if not file:
