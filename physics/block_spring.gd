@@ -64,7 +64,18 @@ const GROUND_Y: float = 0.0
 # =========================================================================
 
 ## Original world position (set once at init, never changes).
+## Used ONLY for world-space math (ground clamp, break checks) — NEVER
+## assign it to block.node.position.
 var rest_position: Vector3 = Vector3.ZERO
+
+## The node's LOCAL rest position, captured lazily on first update.
+## block.position is WORLD/map space but block.node.position is LOCAL to
+## the assembly root. Mixing them teleported every touched block by its
+## assembly's offset — the mother-tree perimeter bricks (ring assemblies
+## at [0, 6*N, 0]) jumped 6m x ring-index on first contact and vanished
+## ("walls disappear when I walk into them", worse the higher the ring).
+var node_rest: Vector3 = Vector3.ZERO
+var _node_rest_captured: bool = false
 
 ## Current offset from rest position.
 var displacement: Vector3 = Vector3.ZERO
@@ -180,6 +191,12 @@ func schedule_propagation(impulse: Vector3, from_id: String, block: Block) -> vo
 func step(dt: float, block: Block, registry) -> Array:
 	var propagation_requests: Array = []
 
+	# --- Capture the node's LOCAL rest position on first tick ---
+	# (block.node may not exist at init_from_block time; see node_rest doc.)
+	if not _node_rest_captured and block.node and is_instance_valid(block.node):
+		node_rest = block.node.position
+		_node_rest_captured = true
+
 	# --- Process pending propagations (tick down delays) ---
 	var still_pending: Array = []
 	for p in _pending_propagations:
@@ -222,9 +239,9 @@ func step(dt: float, block: Block, registry) -> Array:
 			velocity.x *= 0.9
 			velocity.z *= 0.9
 
-		# Update visual
+		# Update visual (node_rest is LOCAL space — never rest_position here)
 		if block.node and is_instance_valid(block.node):
-			block.node.position = rest_position + displacement
+			block.node.position = node_rest + displacement
 			# Tumble rotation for drama
 			block.node.rotation.x += velocity.z * dt * 2.0
 			block.node.rotation.z -= velocity.x * dt * 2.0
@@ -269,9 +286,9 @@ func step(dt: float, block: Block, registry) -> Array:
 	if _original_connection_count > 0 and block.connections.size() == 0 and not freed:
 		_enter_freed_mode(block)
 
-	# --- Update visual position ---
+	# --- Update visual position (node_rest is LOCAL space) ---
 	if block.node and is_instance_valid(block.node):
-		block.node.position = rest_position + displacement
+		block.node.position = node_rest + displacement
 
 	# --- Sleep check ---
 	if displacement.length() < SLEEP_THRESHOLD and velocity.length() < SLEEP_THRESHOLD \
@@ -279,9 +296,9 @@ func step(dt: float, block: Block, registry) -> Array:
 		displacement = Vector3.ZERO
 		velocity = Vector3.ZERO
 		is_active = false
-		# Snap visual back to rest
+		# Snap visual back to rest (LOCAL space)
 		if block.node and is_instance_valid(block.node):
-			block.node.position = rest_position
+			block.node.position = node_rest
 
 	return propagation_requests
 
