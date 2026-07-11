@@ -139,7 +139,7 @@ See README.md for a full example.
 | Zone not loading | `io/block_zone_loader.gd` + `io/block_file.gd` |
 | Mesh merging skipped | `building/block_mesh_merger.gd` — check extent/block count |
 | Neuron not reacting | `neurons/block_neuron.gd` — check state bindings |
-| Textures "blink" / "settle" after camera stops on Nvidia (not Mac) | MSAA. Set `msaa_3d: 0` in `render_quality.gd` for the affected tier. Apple's GPU hides this; Nvidia exposes it. See root `CLAUDE.md` Known Issues for full diagnostic history — don't rebuild the false-lead chain. |
+| Textures "blink" / "settle" after camera stops on Nvidia (not Mac) | MSAA. Set `msaa_3d: 0` in `render_quality.gd` for the affected tier. Apple's GPU hides this; Nvidia exposes it. See `docs/gotchas.md` → "MSAA Nvidia per-fragment aliasing" for full diagnostic history — don't rebuild the false-lead chain. |
 
 ## Test Commands
 
