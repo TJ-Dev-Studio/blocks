@@ -125,6 +125,13 @@ static func _build_collision(root: Node3D, block: Block) -> void:
 		static_body.name = "Body"
 		static_body.collision_layer = CollisionLayers.to_bit(block.collision_layer)
 		static_body.collision_mask = _compute_mask(block)
+		# Blocks tagged "stairs" opt into the player's auto step-up: the local
+		# stepper only climbs onto surfaces in this group. Anything untagged
+		# stays a wall, so the frog can't mantle railings, barricades, or props.
+		# persistent=true: the compiled world cache packs built nodes into
+		# PackedScenes, which only serialize persistent group memberships.
+		if block.tags.has("stairs"):
+			static_body.add_to_group("stair_walkable", true)
 		body = static_body
 
 	var col := CollisionShape3D.new()
