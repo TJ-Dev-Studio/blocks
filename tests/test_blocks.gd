@@ -932,9 +932,11 @@ func _test_material_override_parsing() -> void:
 	# --- file_to_block(): 3-element color array ---
 	var data_3col := {
 		"format_version": 1,
-		"identity": {"name": "test_3col"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"color": [0.8, 0.3, 0.1]}
+		"name": "test_3col",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"color": [0.8, 0.3, 0.1]}
+		},
 	}
 	var b_3col := BlockFile.file_to_block(data_3col)
 	_assert(absf(b_3col.color_tint.r - 0.8) < 0.001, "3-element color: r = 0.8")
@@ -945,9 +947,11 @@ func _test_material_override_parsing() -> void:
 	# --- file_to_block(): 4-element color array ---
 	var data_4col := {
 		"format_version": 1,
-		"identity": {"name": "test_4col"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"color": [0.8, 0.3, 0.1, 0.5]}
+		"name": "test_4col",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"color": [0.8, 0.3, 0.1, 0.5]}
+		},
 	}
 	var b_4col := BlockFile.file_to_block(data_4col)
 	_assert(absf(b_4col.color_tint.a - 0.5) < 0.001, "4-element color: alpha = 0.5")
@@ -955,9 +959,11 @@ func _test_material_override_parsing() -> void:
 	# --- file_to_block(): no visual.color leaves WHITE ---
 	var data_nocol := {
 		"format_version": 1,
-		"identity": {"name": "test_nocol"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {}
+		"name": "test_nocol",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {}
+		},
 	}
 	var b_nocol := BlockFile.file_to_block(data_nocol)
 	_assert(b_nocol.color_tint == Color.WHITE, "missing visual.color leaves Color.WHITE")
@@ -965,9 +971,11 @@ func _test_material_override_parsing() -> void:
 	# --- file_to_block(): visual.roughness ---
 	var data_rough := {
 		"format_version": 1,
-		"identity": {"name": "test_rough"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"roughness": 0.9}
+		"name": "test_rough",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"roughness": 0.9}
+		},
 	}
 	var b_rough := BlockFile.file_to_block(data_rough)
 	_assert(b_rough.material_params.has("roughness"), "roughness parsed into material_params")
@@ -976,9 +984,11 @@ func _test_material_override_parsing() -> void:
 	# --- file_to_block(): visual.metallic ---
 	var data_metal := {
 		"format_version": 1,
-		"identity": {"name": "test_metal"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"metallic": 0.8}
+		"name": "test_metal",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"metallic": 0.8}
+		},
 	}
 	var b_metal := BlockFile.file_to_block(data_metal)
 	_assert(b_metal.material_params.has("metallic"), "metallic parsed into material_params")
@@ -987,9 +997,11 @@ func _test_material_override_parsing() -> void:
 	# --- file_to_block(): visual.bump_scale ---
 	var data_bump := {
 		"format_version": 1,
-		"identity": {"name": "test_bump"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"bump_scale": 0.5}
+		"name": "test_bump",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"bump_scale": 0.5}
+		},
 	}
 	var b_bump := BlockFile.file_to_block(data_bump)
 	_assert(b_bump.material_params.has("surface_noise_strength"),
@@ -1000,9 +1012,11 @@ func _test_material_override_parsing() -> void:
 	# --- file_to_block(): visual.noise_scale ---
 	var data_nscale := {
 		"format_version": 1,
-		"identity": {"name": "test_nscale"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"noise": {"scale": 12.0, "strength": 0.1}}
+		"name": "test_nscale",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"noise": {"scale": 12.0, "strength": 0.1}}
+		},
 	}
 	var b_nscale := BlockFile.file_to_block(data_nscale)
 	_assert(b_nscale.material_params.has("surface_noise_scale"),
@@ -1013,9 +1027,11 @@ func _test_material_override_parsing() -> void:
 	# --- file_to_block(): no overrides → empty material_params ---
 	var data_plain := {
 		"format_version": 1,
-		"identity": {"name": "test_plain"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"material": "wood"}
+		"name": "test_plain",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"material": "wood"}
+		},
 	}
 	var b_plain := BlockFile.file_to_block(data_plain)
 	_assert(b_plain.material_params.is_empty(), "no overrides → empty material_params")
@@ -1391,9 +1407,11 @@ func _test_procedural_material_cache() -> void:
 	# --- file_to_block() with visual.material_type: "bark" sets material_type_id ---
 	var data_bark := {
 		"format_version": 1,
-		"identity": {"name": "test_proc_bark"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"material": "bark", "material_type": "bark"}
+		"name": "test_proc_bark",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"material": "bark", "material_type": "bark"}
+		},
 	}
 	var block_bark := BlockFile.file_to_block(data_bark)
 	_assert(block_bark.material_type_id == "bark",
@@ -1402,9 +1420,11 @@ func _test_procedural_material_cache() -> void:
 	# --- file_to_block() with visual.material_type: "stone" sets material_type_id ---
 	var data_stone_parse := {
 		"format_version": 1,
-		"identity": {"name": "test_proc_stone"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"material": "stone", "material_type": "stone"}
+		"name": "test_proc_stone",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"material": "stone", "material_type": "stone"}
+		},
 	}
 	var block_stone := BlockFile.file_to_block(data_stone_parse)
 	_assert(block_stone.material_type_id == "stone",
@@ -1413,9 +1433,11 @@ func _test_procedural_material_cache() -> void:
 	# --- file_to_block() with NO visual.material_type leaves material_type_id = "" ---
 	var data_no_proc := {
 		"format_version": 1,
-		"identity": {"name": "test_no_proc"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"material": "wood"}
+		"name": "test_no_proc",
+		"properties": {
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"material": "wood"}
+		},
 	}
 	var block_no_proc := BlockFile.file_to_block(data_no_proc)
 	_assert(block_no_proc.material_type_id == "",
@@ -1933,16 +1955,18 @@ func _test_materials_list_field() -> void:
 	# --- materials_list parsed by file_to_block ---
 	var data_mats := {
 		"format_version": 1,
-		"identity": {"name": "test_mats_parse"},
-		"collision": {"shape": "cylinder", "size": [0.4, 1.8, 0]},
-		"visual": {
-			"mesh_type": "glb",
-			"mesh": "res://some_model.glb",
-			"materials": [
-				{"palette_key": "stone"},
-				{"palette_key": "metal_light", "params": {"metallic": 0.9}}
-			]
-		}
+		"name": "test_mats_parse",
+		"properties": {
+			"collision": {"shape": "cylinder", "size": [0.4, 1.8, 0]},
+			"visual": {
+				"mesh_type": "glb",
+				"mesh": "res://some_model.glb",
+				"materials": [
+					{"palette_key": "stone"},
+					{"palette_key": "metal_light", "params": {"metallic": 0.9}}
+				]
+			}
+		},
 	}
 	var parsed := BlockFile.file_to_block(data_mats)
 	_assert(parsed.mesh_type == 2, "GLB parse: file_to_block sets mesh_type=2 for 'glb'")
@@ -1962,14 +1986,16 @@ func _test_multi_material_parsing() -> void:
 	# --- Parse a primitive block with visual.materials array ---
 	var data := {
 		"format_version": 1,
-		"identity": {"name": "barrel"},
-		"collision": {"shape": "cylinder", "size": [0.3, 0.9, 0]},
-		"visual": {
-			"materials": [
-				{"palette_key": "metal_dark"},
-				{"palette_key": "glow_yellow", "params": {"roughness": 0.3}}
-			]
-		}
+		"name": "barrel",
+		"properties": {
+			"collision": {"shape": "cylinder", "size": [0.3, 0.9, 0]},
+			"visual": {
+				"materials": [
+					{"palette_key": "metal_dark"},
+					{"palette_key": "glow_yellow", "params": {"roughness": 0.3}}
+				]
+			}
+		},
 	}
 	var block := BlockFile.file_to_block(data)
 	_assert(block.materials_list.size() == 2,
@@ -2125,18 +2151,22 @@ func _test_light_file_parsing() -> void:
 	var data := {
 		"format_version": "1.0",
 		"block_type": "element",
-		"identity": {"name": "test_light", "category": "effect", "tags": ["light"]},
-		"collision": {"shape": "sphere", "size": [0.15, 0.3, 0.15], "interaction": "none",
-			"server_collidable": false},
-		"visual": {"material": "glow_orange", "cast_shadow": false},
-		"light": {
-			"type": "omni",
-			"color": [1.0, 0.8, 0.4],
-			"energy": 1.5,
-			"range": 6.0,
-			"group": "lanterns",
-			"shadow": false,
+		"name": "test_light",
+		"properties": {
+			"category": "effect",
+			"collision": {"shape": "sphere", "size": [0.15, 0.3, 0.15], "interaction": "none",
+				"server_collidable": false},
+			"visual": {"material": "glow_orange", "cast_shadow": false},
+			"light": {
+				"type": "omni",
+				"color": [1.0, 0.8, 0.4],
+				"energy": 1.5,
+				"range": 6.0,
+				"group": "lanterns",
+				"shadow": false,
+			},
 		},
+		"tags": ["light"],
 	}
 
 	var block := BlockFile.file_to_block(data)
@@ -2157,9 +2187,12 @@ func _test_light_file_parsing() -> void:
 	var data_no_light := {
 		"format_version": "1.0",
 		"block_type": "element",
-		"identity": {"name": "no_light", "category": "prop"},
-		"collision": {"shape": "box", "size": [1, 1, 1]},
-		"visual": {"material": "default"},
+		"name": "no_light",
+		"properties": {
+			"category": "prop",
+			"collision": {"shape": "box", "size": [1, 1, 1]},
+			"visual": {"material": "default"},
+		},
 	}
 	var block_no_light := BlockFile.file_to_block(data_no_light)
 	_assert(block_no_light.light_config.is_empty(),
