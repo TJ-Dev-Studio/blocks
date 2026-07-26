@@ -289,24 +289,31 @@ func to_collision_dict() -> Dictionary:
 	var half_z: float
 	var height: float
 
+	# GC-56: the authored position is the shape's vertical CENTRE — every Godot
+	# primitive the builder creates is centered on its node origin, and the
+	# content was authored against that rendering. `height` is therefore the
+	# position plus HALF the vertical extent. The old `+ full size.y` convention
+	# inflated every exported box upward by half its height, which told the
+	# server that players standing on rendered surfaces were metres inside solid
+	# terrain (SV-28). Keep in lockstep with collision-math.ts localExtents.
 	match collision_shape:
 		BlockCategories.SHAPE_BOX, BlockCategories.SHAPE_RAMP:
 			half_x = collision_size.x * scale_factor / 2.0
 			half_z = collision_size.z * scale_factor / 2.0
-			height = position.y + collision_offset.y + collision_size.y * scale_factor
+			height = position.y + collision_offset.y + collision_size.y * scale_factor / 2.0
 		BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE, BlockCategories.SHAPE_SPHERE:
 			half_x = collision_size.x * scale_factor  # radius
 			half_z = collision_size.x * scale_factor
-			height = position.y + collision_offset.y + collision_size.y * scale_factor
+			height = position.y + collision_offset.y + collision_size.y * scale_factor / 2.0
 		BlockCategories.SHAPE_CONE, BlockCategories.SHAPE_ROCK:
 			half_x = collision_size.x * scale_factor  # radius
 			half_z = collision_size.x * scale_factor
-			height = position.y + collision_offset.y + collision_size.y * scale_factor
+			height = position.y + collision_offset.y + collision_size.y * scale_factor / 2.0
 		BlockCategories.SHAPE_TORUS, BlockCategories.SHAPE_ARCH:
 			half_x = collision_size.y * scale_factor  # outer_radius
 			half_z = collision_size.y * scale_factor
 			var ring_r := (collision_size.y - collision_size.x) * scale_factor
-			height = position.y + collision_offset.y + ring_r * 2.0
+			height = position.y + collision_offset.y + ring_r
 		_:
 			return {}
 

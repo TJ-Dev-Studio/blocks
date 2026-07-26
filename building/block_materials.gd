@@ -342,6 +342,14 @@ static func get_material_with_overrides(material_id: String, params: Dictionary)
 	var mat: ShaderMaterial = (base as ShaderMaterial).duplicate() as ShaderMaterial
 	for param_name: String in params:
 		mat.set_shader_parameter(param_name, params[param_name])
+	# duplicate() COPIES resource_name from the base, so without this the tinted
+	# material still claims to be plain "sand". A consumer that re-applies
+	# materials by resource_name after loading a cached .scn (the game's
+	# WorldCacheLoader does exactly that) then swaps the tint back out for the
+	# untinted base — every visual.color override in the scene silently
+	# reverts. Stamp the full override key instead: it is not a palette id, so
+	# has_material() misses it and the re-apply pass leaves it alone.
+	mat.resource_name = key
 
 	if _override_cache.size() >= 200:
 		push_warning("[BlockMaterials] Override cache at 200+ entries — consider clearing on zone unload")
@@ -363,6 +371,7 @@ static func get_material_tinted(material_id: String, tint: Color) -> Material:
 		return base
 
 	var mat: ShaderMaterial = (base as ShaderMaterial).duplicate() as ShaderMaterial
+	mat.resource_name = key   # see get_material_with_overrides(); same hazard
 	mat.set_shader_parameter("tint_color", tint)
 	# Also pre-multiply albedo_color so the base color is correct even without the tint uniform
 	mat.set_shader_parameter("albedo_color", get_color(material_id) * tint)

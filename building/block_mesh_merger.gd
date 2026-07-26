@@ -35,6 +35,13 @@ const NORMAL_DOT_THRESHOLD := 0.9
 ## Each chunk's merged AABB stays small enough for visibility_range culling.
 const CHUNK_SIZE := 16.0
 
+## Bucket edge (meters) for the face-cull pair spatial hash (TL-42). Boxes are
+## bucketed by their tolerance-inflated AABBs; only same-bucket pairs are
+## tested for touching faces. Sized around typical block edge lengths — bigger
+## buckets test more non-touching pairs, smaller ones insert big boxes into
+## more buckets.
+const PAIR_HASH_CELL := 4.0
+
 ## Visibility range for chunked merged meshes. Safe because chunk AABBs are ≤16m.
 const CHUNK_VIS_RANGE := 80.0
 
@@ -292,85 +299,116 @@ static func _find_culled_faces(meshes: Array) -> Dictionary:
 			"max": origin + half_size,
 		}
 
-	# Check all pairs of box entries
+	# Candidate pairs via a spatial hash instead of the all-pairs sweep.
+	# All-pairs is O(N²): a 628-block assembly is ~197k pair tests × 3 axes in
+	# GDScript — the bulk of an 11.2s main-thread stall on hot reload (TL-42).
+	# Face culling only ever applies to TOUCHING boxes, so bucketing AABBs on a
+	# coarse grid and testing only same-bucket pairs is exact, not approximate:
+	# every touching pair shares at least one bucket once each AABB is inflated
+	# by the touch tolerance.
+	var buckets: Dictionary = {}  # Vector3i cell -> Array[int] (entry indices)
 	for i: int in range(meshes.size()):
 		if aabb_data[i] == null:
 			continue
-		var a_min: Vector3 = aabb_data[i]["min"]
-		var a_max: Vector3 = aabb_data[i]["max"]
+		var bmin: Vector3 = aabb_data[i]["min"] - Vector3.ONE * FACE_TOUCH_TOLERANCE
+		var bmax: Vector3 = aabb_data[i]["max"] + Vector3.ONE * FACE_TOUCH_TOLERANCE
+		for cx in range(int(floorf(bmin.x / PAIR_HASH_CELL)), int(floorf(bmax.x / PAIR_HASH_CELL)) + 1):
+			for cy in range(int(floorf(bmin.y / PAIR_HASH_CELL)), int(floorf(bmax.y / PAIR_HASH_CELL)) + 1):
+				for cz in range(int(floorf(bmin.z / PAIR_HASH_CELL)), int(floorf(bmax.z / PAIR_HASH_CELL)) + 1):
+					var cell := Vector3i(cx, cy, cz)
+					if not buckets.has(cell):
+						buckets[cell] = []
+					buckets[cell].append(i)
 
-		for j: int in range(i + 1, meshes.size()):
-			if aabb_data[j] == null:
-				continue
-			var b_min: Vector3 = aabb_data[j]["min"]
-			var b_max: Vector3 = aabb_data[j]["max"]
-
-			# Check each axis for touching faces
-			# Axis X: A's +X face touches B's -X face (or vice versa)
-			# Axis Y: A's +Y face touches B's -Y face (or vice versa)
-			# Axis Z: A's +Z face touches B's -Z face (or vice versa)
-			for axis: int in range(3):
-				# Get the two perpendicular axes
-				var perp1: int = (axis + 1) % 3
-				var perp2: int = (axis + 2) % 3
-
-				# Check overlap on perpendicular axes (both must overlap)
-				var overlap1 := minf(a_max[perp1], b_max[perp1]) - maxf(a_min[perp1], b_min[perp1])
-				var overlap2 := minf(a_max[perp2], b_max[perp2]) - maxf(a_min[perp2], b_min[perp2])
-				if overlap1 < FACE_TOUCH_TOLERANCE or overlap2 < FACE_TOUCH_TOLERANCE:
-					continue  # no meaningful overlap on perpendicular axes
-
-				# Per-block face extents on perpendicular axes
-				var a_extent1 := a_max[perp1] - a_min[perp1]
-				var a_extent2 := a_max[perp2] - a_min[perp2]
-				var b_extent1 := b_max[perp1] - b_min[perp1]
-				var b_extent2 := b_max[perp2] - b_min[perp2]
-
-				# Coverage ratio: how much of each face is covered by the overlap
-				var a_cov1 := overlap1 / a_extent1 if a_extent1 > 0.001 else 1.0
-				var a_cov2 := overlap2 / a_extent2 if a_extent2 > 0.001 else 1.0
-				var b_cov1 := overlap1 / b_extent1 if b_extent1 > 0.001 else 1.0
-				var b_cov2 := overlap2 / b_extent2 if b_extent2 > 0.001 else 1.0
-				var a_covered := a_cov1 >= MIN_FACE_COVERAGE and a_cov2 >= MIN_FACE_COVERAGE
-				var b_covered := b_cov1 >= MIN_FACE_COVERAGE and b_cov2 >= MIN_FACE_COVERAGE
-
-				# Check if A's max face touches B's min face on this axis
-				if absf(a_max[axis] - b_min[axis]) < FACE_TOUCH_TOLERANCE:
-					var normal_pos := Vector3.ZERO
-					normal_pos[axis] = 1.0
-					var normal_neg := Vector3.ZERO
-					normal_neg[axis] = -1.0
-					# Only cull A's face if B covers enough of it — but NEVER cull an
-					# upward (+Y) face. Walkable platforms/landings/decks rest flush
-					# against neighbours; culling their top leaves them collidable but
-					# invisible (the horde ramp/landing slabs vanished this way).
-					if a_covered and axis != 1:
-						if not culled.has(i):
-							culled[i] = []
-						culled[i].append(normal_pos)
-					# Only cull B's face if A covers enough of it
-					if b_covered:
-						if not culled.has(j):
-							culled[j] = []
-						culled[j].append(normal_neg)
-
-				# Check if B's max face touches A's min face on this axis
-				elif absf(b_max[axis] - a_min[axis]) < FACE_TOUCH_TOLERANCE:
-					var normal_pos := Vector3.ZERO
-					normal_pos[axis] = 1.0
-					var normal_neg := Vector3.ZERO
-					normal_neg[axis] = -1.0
-					# NEVER cull an upward (+Y) face — see note above.
-					if b_covered and axis != 1:
-						if not culled.has(j):
-							culled[j] = []
-						culled[j].append(normal_pos)
-					if a_covered:
-						if not culled.has(i):
-							culled[i] = []
-						culled[i].append(normal_neg)
+	var tested: Dictionary = {}  # packed pair key -> true
+	for cell_key: Vector3i in buckets:
+		var bucket: Array = buckets[cell_key]
+		for bi: int in range(bucket.size()):
+			for bj: int in range(bi + 1, bucket.size()):
+				var i: int = bucket[bi]
+				var j: int = bucket[bj]
+				var pair_key: int = i * meshes.size() + j
+				if tested.has(pair_key):
+					continue
+				tested[pair_key] = true
+				_cull_touching_pair(i, j, aabb_data, culled)
 
 	return culled
+
+
+## Test one candidate box pair for touching faces and record culled directions.
+## Body unchanged from the original all-pairs loop — only the pair enumeration
+## moved to the spatial hash above.
+static func _cull_touching_pair(i: int, j: int, aabb_data: Array, culled: Dictionary) -> void:
+	var a_min: Vector3 = aabb_data[i]["min"]
+	var a_max: Vector3 = aabb_data[i]["max"]
+	var b_min: Vector3 = aabb_data[j]["min"]
+	var b_max: Vector3 = aabb_data[j]["max"]
+
+	# Check each axis for touching faces
+	# Axis X: A's +X face touches B's -X face (or vice versa)
+	# Axis Y: A's +Y face touches B's -Y face (or vice versa)
+	# Axis Z: A's +Z face touches B's -Z face (or vice versa)
+	for axis: int in range(3):
+		# Get the two perpendicular axes
+		var perp1: int = (axis + 1) % 3
+		var perp2: int = (axis + 2) % 3
+
+		# Check overlap on perpendicular axes (both must overlap)
+		var overlap1 := minf(a_max[perp1], b_max[perp1]) - maxf(a_min[perp1], b_min[perp1])
+		var overlap2 := minf(a_max[perp2], b_max[perp2]) - maxf(a_min[perp2], b_min[perp2])
+		if overlap1 < FACE_TOUCH_TOLERANCE or overlap2 < FACE_TOUCH_TOLERANCE:
+			continue  # no meaningful overlap on perpendicular axes
+
+		# Per-block face extents on perpendicular axes
+		var a_extent1 := a_max[perp1] - a_min[perp1]
+		var a_extent2 := a_max[perp2] - a_min[perp2]
+		var b_extent1 := b_max[perp1] - b_min[perp1]
+		var b_extent2 := b_max[perp2] - b_min[perp2]
+
+		# Coverage ratio: how much of each face is covered by the overlap
+		var a_cov1 := overlap1 / a_extent1 if a_extent1 > 0.001 else 1.0
+		var a_cov2 := overlap2 / a_extent2 if a_extent2 > 0.001 else 1.0
+		var b_cov1 := overlap1 / b_extent1 if b_extent1 > 0.001 else 1.0
+		var b_cov2 := overlap2 / b_extent2 if b_extent2 > 0.001 else 1.0
+		var a_covered := a_cov1 >= MIN_FACE_COVERAGE and a_cov2 >= MIN_FACE_COVERAGE
+		var b_covered := b_cov1 >= MIN_FACE_COVERAGE and b_cov2 >= MIN_FACE_COVERAGE
+
+		# Check if A's max face touches B's min face on this axis
+		if absf(a_max[axis] - b_min[axis]) < FACE_TOUCH_TOLERANCE:
+			var normal_pos := Vector3.ZERO
+			normal_pos[axis] = 1.0
+			var normal_neg := Vector3.ZERO
+			normal_neg[axis] = -1.0
+			# Only cull A's face if B covers enough of it — but NEVER cull an
+			# upward (+Y) face. Walkable platforms/landings/decks rest flush
+			# against neighbours; culling their top leaves them collidable but
+			# invisible (the horde ramp/landing slabs vanished this way).
+			if a_covered and axis != 1:
+				if not culled.has(i):
+					culled[i] = []
+				culled[i].append(normal_pos)
+			# Only cull B's face if A covers enough of it
+			if b_covered:
+				if not culled.has(j):
+					culled[j] = []
+				culled[j].append(normal_neg)
+
+		# Check if B's max face touches A's min face on this axis
+		elif absf(b_max[axis] - a_min[axis]) < FACE_TOUCH_TOLERANCE:
+			var normal_pos := Vector3.ZERO
+			normal_pos[axis] = 1.0
+			var normal_neg := Vector3.ZERO
+			normal_neg[axis] = -1.0
+			# NEVER cull an upward (+Y) face — see note above.
+			if b_covered and axis != 1:
+				if not culled.has(j):
+					culled[j] = []
+				culled[j].append(normal_pos)
+			if a_covered:
+				if not culled.has(i):
+					culled[i] = []
+				culled[i].append(normal_neg)
 
 
 ## Append mesh triangles to a SurfaceTool, skipping triangles whose face normal
