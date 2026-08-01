@@ -39,6 +39,7 @@ static var shader_param_injector: Callable = Callable()
 ## texture paths, shaders) lives in the game and is registered here.
 ##   palette: {id -> Color}              roughness: {id -> float}
 ##   textured: {id -> texture_path}      triplanar / local_space: {id -> bool}
+##   world_aligned: {id -> bool}         (masonry mode — see below)
 ##   scale_overrides: {id -> float}      aspect_overrides: {id -> Vector2}
 ##   material_type_map: {type -> int}
 ##   shader_path / proc_shader_path: String (block world + procedural shaders)
@@ -48,6 +49,7 @@ static func register_materials(library: Dictionary) -> void:
 	_merge_into(TEXTURED_MATERIALS, library.get("textured", {}))
 	_merge_into(TEXTURED_USE_TRIPLANAR, library.get("triplanar", {}))
 	_merge_into(TEXTURED_USE_LOCAL_SPACE, library.get("local_space", {}))
+	_merge_into(TEXTURED_WORLD_ALIGNED, library.get("world_aligned", {}))
 	_merge_into(TEXTURED_SCALE_OVERRIDES, library.get("scale_overrides", {}))
 	_merge_into(TEXTURED_ASPECT_OVERRIDES, library.get("aspect_overrides", {}))
 	_merge_into(MATERIAL_TYPE_MAP, library.get("material_type_map", {}))
@@ -101,6 +103,13 @@ static var TEXTURED_MATERIALS: Dictionary = {}
 ## aspect_overrides). Defaults below apply to any material the game doesn't list.
 static var TEXTURED_USE_TRIPLANAR: Dictionary = {}
 static var TEXTURED_USE_LOCAL_SPACE: Dictionary = {}
+## Per-material wall-projection orientation for triplanar sampling.
+## FALSE (default): a wall's texture U runs along Y, so directional art follows
+## the LENGTH of its block — grain along a beam, bark up a trunk.
+## TRUE: masonry mode — every vertical face maps U to a horizontal world axis
+## and V to (flipped) world Y, so coursed stone reads level and right-way-up on
+## every face. Wrong for wood; right for stonework. Empty here — game registers.
+static var TEXTURED_WORLD_ALIGNED: Dictionary = {}
 const TEXTURED_DEFAULT_SCALE: float = 0.5
 static var TEXTURED_SCALE_OVERRIDES: Dictionary = {}
 const TEXTURED_DEFAULT_ASPECT: Vector2 = Vector2(1.0, 1.0)
@@ -494,6 +503,10 @@ static func _get_textured_material(palette_key: String, texture_path: String) ->
 	# Object-space triplanar locks the texture to moving meshes (walking boss).
 	smat.set_shader_parameter("use_local_space_triplanar",
 			bool(TEXTURED_USE_LOCAL_SPACE.get(palette_key, false)))
+	# Masonry mode: courses level in WORLD space (stone). Default keeps the
+	# grain-follows-block mapping (wood, bark) — see block_world.gdshader.
+	smat.set_shader_parameter("use_world_aligned_walls",
+			bool(TEXTURED_WORLD_ALIGNED.get(palette_key, false)))
 	if shader_param_injector.is_valid():
 		shader_param_injector.call(palette_key, smat)
 
