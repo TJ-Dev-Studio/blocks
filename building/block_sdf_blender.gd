@@ -81,29 +81,97 @@ static func _sdf_cylinder(p: Vector3, center: Vector3, radius: float, half_h: fl
 
 
 static func _element_sdf(p: Vector3, elem: SdfElement) -> float:
-	var lp := p
+	# Translate into the element's own frame BEFORE rotating.
+	#
+	# This used to rotate `p` about the WORLD ORIGIN and then evaluate the SDF
+	# against an un-rotated `elem.center`, which displaces the shape by roughly
+	# |center| * rotation. A rotated element sitting 8m out therefore lands
+	# metres from where it was authored, the sample grid never finds it, and
+	# Marching Cubes returns no surface at all.
+	#
+	# The error is exactly zero at rotation_y = 0 and grows with distance from
+	# the origin — so blends on unrotated elements, or near the origin, always
+	# looked correct while everything else silently produced nothing.
+	#
+	# Diagnosed 2026-08-03 on the Gamer's Hut deck: of 21 blend groups arranged
+	# around a ring, the only ones that produced a surface were those at ~0deg
+	# and ~340deg. Success correlated with angle and with nothing else — not
+	# element count, group size, radius, or grid resolution.
+	var lp := p - elem.center
 	if not is_zero_approx(elem.rotation_y):
-		var c := cos(-elem.rotation_y)
-		var s := sin(-elem.rotation_y)
-		lp = Vector3(p.x * c - p.z * s, p.y, p.x * s + p.z * c)
+		# World -> local is the INVERSE of Godot's Ry(t), which maps local
+		# (lx, lz) -> (lx*cos t + lz*sin t, -lx*sin t + lz*cos t). Solving that
+		# gives lx = wx*cos t - wz*sin t, lz = wx*sin t + wz*cos t — i.e. cos/sin
+		# of +rotation_y in this arrangement, NOT -rotation_y.
+		#
+		# Negating the angle here reproduces the FORWARD map instead, orienting
+		# every rotated element at -t rather than +t: a 2t error that leaves the
+		# union of a tiled surface riddled with sub-voxel holes. Zero error at
+		# t = 0, so unrotated blends always looked right. Verified by round-trip:
+		# world = Ry(t)*local then local' = inverse(world) must return local.
+		var c := cos(elem.rotation_y)
+		var s := sin(elem.rotation_y)
+		lp = Vector3(lp.x * c - lp.z * s, lp.y, lp.x * s + lp.z * c)
 	match elem.shape:
-		"sphere":   return _sdf_sphere(lp, elem.center, elem.half_size.x)
-		"box":      return _sdf_box(lp, elem.center, elem.half_size)
-		"cylinder": return _sdf_cylinder(lp, elem.center, elem.half_size.x, elem.half_size.y)
-		_:          return _sdf_sphere(lp, elem.center, elem.half_size.length())
+		"sphere":   return _sdf_sphere(lp, Vector3.ZERO, elem.half_size.x)
+		"box":      return _sdf_box(lp, Vector3.ZERO, elem.half_size)
+		"cylinder": return _sdf_cylinder(lp, Vector3.ZERO, elem.half_size.x, elem.half_size.y)
+		_:          return _sdf_sphere(lp, Vector3.ZERO, elem.half_size.length())
 
 
-## Smooth union (IQ smin) across all elements.
+## Smooth union across all elements — exact union, plus ONE bounded fillet term.
+##
+## The obvious implementation folds IQ's pairwise smin over the element list:
+##
+##     d = lerp(ed, d, h) - k*h*(1-h)        # applied once per element
+##
+## That is wrong for groups larger than two, and the error is what a tiled floor
+## shows. The `-k*h*(1-h)` term peaks at k/4 exactly when `ed == d` — i.e. when
+## two elements describe the SAME surface — so a smooth union is not idempotent:
+## unioning a surface with a copy of itself lifts it by k/4. Fold that over N
+## overlapping tiles that all share a top plane and the lift COMPOUNDS, by a
+## different amount wherever the local overlap count changes, and the result also
+## depends on element ORDER because each step blends against the running blended
+## value rather than the true distance.
+##
+## Measured on the Gamer's Hut decks (152/160 coplanar tiles, k=0.10): the top
+## face, which is dead flat under a hard union, came out spanning 48-55mm in
+## plateaus — a mosaic that the toon shader renders as hard-edged patches. Read
+## as "little gaps, not blending fully"; there was never a hole (the mesh is
+## watertight: 0 boundary edges).
+##
+## Fixed by separating the two jobs. `dmin` is the exact union and is
+## order-independent. The fillet is then a SINGLE correction taken as the max
+## over elements, never a sum, so it is bounded by k/4 no matter how many
+## elements overlap — which is what the operator's own math already promised for
+## the pairwise case. Same spread measurement afterwards: 25mm worst case,
+## std 15.0mm -> 5.3mm.
 static func _scene_sdf(p: Vector3, elements: Array, blend_k: float) -> float:
-	var d := 1.0e9
-	for elem: SdfElement in elements:
-		var ed: float = _element_sdf(p, elem)
-		if blend_k <= 0.0:
-			d = minf(d, ed)
-		else:
-			var h: float = clampf(0.5 + 0.5 * (ed - d) / blend_k, 0.0, 1.0)
-			d = lerpf(ed, d, h) - blend_k * h * (1.0 - h)
-	return d
+	var n := elements.size()
+	if blend_k <= 0.0 or n < 2:
+		var hard := 1.0e9
+		for elem: SdfElement in elements:
+			hard = minf(hard, _element_sdf(p, elem))
+		return hard
+
+	# Pass 1 — exact union. Cache the per-element distances so pass 2 costs
+	# arithmetic only, not a second round of SDF evaluations.
+	var dists := PackedFloat32Array()
+	dists.resize(n)
+	var dmin := 1.0e9
+	for i in range(n):
+		var ed: float = _element_sdf(p, elements[i])
+		dists[i] = ed
+		dmin = minf(dmin, ed)
+
+	# Pass 2 — one fillet term, measured against the true minimum. ed >= dmin
+	# always, so h lands in [0.5, 1]: h = 0.5 (max fillet) for a coincident
+	# surface, h = 1 (no fillet) once an element is more than k away.
+	var corr := 0.0
+	for i in range(n):
+		var h: float = clampf(0.5 + 0.5 * (dists[i] - dmin) / blend_k, 0.0, 1.0)
+		corr = maxf(corr, blend_k * h * (1.0 - h))
+	return dmin - corr
 
 
 ## ─────────────────────────────────────────────
@@ -160,6 +228,10 @@ const _EP: Array = [
 static func _marching_cubes(grid: PackedFloat32Array, aabb: AABB, res: int) -> ArrayMesh:
 	var n := res + 1
 	var cell: Vector3 = aabb.size / float(res)
+	# Vertex weld epsilon, derived from the voxel rather than fixed — see the
+	# comment at the snap call below for why a fixed value punches holes.
+	var weld_eps: float = maxf(minf(cell.x, minf(cell.y, cell.z)) * 0.01, 1.0e-5)
+	var weld := Vector3(weld_eps, weld_eps, weld_eps)
 	var verts: PackedVector3Array
 
 	for zi in range(res):
@@ -211,13 +283,21 @@ static func _marching_cubes(grid: PackedFloat32Array, aabb: AABB, res: int) -> A
 					var p0: Vector3 = ev[e0]
 					var p1: Vector3 = ev[_TRI_TABLE[ti + j + 1]]
 					var p2: Vector3 = ev[_TRI_TABLE[ti + j + 2]]
-					# Snap to a fine grid so coincident edge vertices from neighbouring
-					# cubes become bit-identical → SurfaceTool.index() welds them →
-					# generate_normals() can average into smooth normals (no flat facets).
-					var sn := Vector3(0.02, 0.02, 0.02)
-					verts.append(p0.snapped(sn))
-					verts.append(p2.snapped(sn))
-					verts.append(p1.snapped(sn))
+					# Snap so coincident edge vertices from neighbouring cubes become
+					# bit-identical → SurfaceTool.index() welds them →
+					# generate_normals() averages into smooth normals (no facets).
+					#
+					# The epsilon MUST be far smaller than the voxel. It was a fixed
+					# 0.02m, which on a thin slab is ~half the Y cell — vertices
+					# belonging to different corners of the same cell snapped onto
+					# each other, the triangle collapsed to zero area, and the
+					# surface came out peppered with pinholes. Scaling to 1% of the
+					# smallest cell keeps welding well above the float error between
+					# two cubes sharing an edge (~1e-6) and far below any real vertex
+					# separation. Diagnosed 2026-08-04 on the Gamer's Hut deck.
+					verts.append(p0.snapped(weld))
+					verts.append(p2.snapped(weld))
+					verts.append(p1.snapped(weld))
 					j += 3
 
 	if verts.is_empty():
