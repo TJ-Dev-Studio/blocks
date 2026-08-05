@@ -52,6 +52,7 @@ static func register_materials(library: Dictionary) -> void:
 	_merge_into(TEXTURED_WORLD_ALIGNED, library.get("world_aligned", {}))
 	_merge_into(TEXTURED_SCALE_OVERRIDES, library.get("scale_overrides", {}))
 	_merge_into(TEXTURED_ASPECT_OVERRIDES, library.get("aspect_overrides", {}))
+	_merge_into(TEXTURED_DETAIL_OVERRIDES, library.get("detail_overrides", {}))
 	_merge_into(MATERIAL_TYPE_MAP, library.get("material_type_map", {}))
 	if library.has("shader_path"):
 		shader_path = String(library["shader_path"])
@@ -114,6 +115,9 @@ const TEXTURED_DEFAULT_SCALE: float = 0.5
 static var TEXTURED_SCALE_OVERRIDES: Dictionary = {}
 const TEXTURED_DEFAULT_ASPECT: Vector2 = Vector2(1.0, 1.0)
 static var TEXTURED_ASPECT_OVERRIDES: Dictionary = {}
+## GC-77 detail octave, id -> Vector2(frequency_multiplier, strength).
+## Absent or strength 0 = the shader skips the extra fetch entirely.
+static var TEXTURED_DETAIL_OVERRIDES: Dictionary = {}
 
 ## Lazy-load the game-registered block world shader. Returns null if no shader
 ## was registered (headless library) or the file is missing.
@@ -494,6 +498,12 @@ static func _get_textured_material(palette_key: String, texture_path: String) ->
 			float(TEXTURED_SCALE_OVERRIDES.get(palette_key, TEXTURED_DEFAULT_SCALE)))
 	smat.set_shader_parameter("albedo_uv_aspect",
 			TEXTURED_ASPECT_OVERRIDES.get(palette_key, TEXTURED_DEFAULT_ASPECT) as Vector2)
+	# GC-77 detail octave — a second, higher-frequency triplanar fetch applied as
+	# luminance grain. Opt-in per material; strength 0 (the default) makes the
+	# shader skip the fetch entirely, so unlisted materials are unchanged.
+	var _detail: Vector2 = TEXTURED_DETAIL_OVERRIDES.get(palette_key, Vector2.ZERO) as Vector2
+	smat.set_shader_parameter("albedo_detail_scale", maxf(_detail.x, 1.0))
+	smat.set_shader_parameter("albedo_detail_strength", _detail.y)
 	# Per-material triplanar toggle. False for cubic blocks (brick / stone /
 	# parapet) where triplanar's 3-projection blend strobes pixel-by-pixel
 	# under camera motion. True for organic meshes (bark on cylindrical

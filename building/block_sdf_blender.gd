@@ -18,11 +18,14 @@ class_name BlockSdfBlender
 
 ## Element descriptor for SDF evaluation. Built from block JSON by the factory.
 class SdfElement:
-	var shape: String       ## "sphere" | "box" | "cylinder"
+	var shape: String       ## "sphere" | "ellipsoid" | "box" | "cylinder"
 	var center: Vector3     ## world/local position of element
-	## sphere:   half_size.x = radius
-	## box:      half_size = (hx, hy, hz) half-extents
-	## cylinder: half_size.x = radius, half_size.y = half_height
+	## sphere:    half_size.x = radius
+	## ellipsoid: half_size = (rx, ry, rz) per-axis radii — use this for any
+	##            block whose rendered mesh is a squashed sphere/dome, or the
+	##            blend inflates it back to a ball (see _sdf_ellipsoid)
+	## box:       half_size = (hx, hy, hz) half-extents
+	## cylinder:  half_size.x = radius, half_size.y = half_height
 	var half_size: Vector3
 	var rotation_y: float = 0.0  ## local Y rotation in radians
 
@@ -80,6 +83,33 @@ static func _sdf_cylinder(p: Vector3, center: Vector3, radius: float, half_h: fl
 	return minf(maxf(dx, dy), 0.0) + Vector2(maxf(dx, 0.0), maxf(dy, 0.0)).length()
 
 
+## Ellipsoid — IQ's bounded approximation. NOT an exact SDF (no closed form
+## exists), but the bound is tight near the surface, which is the only place
+## marching cubes samples that matters.
+##
+## Why this exists: BlockBuilder renders a SPHERE block as an ellipsoid
+## (`sphere.radius = dims.x; sphere.height = dims.y`), so a squashed blob is
+## visually a dome. Feeding that to _sdf_sphere with radius = dims.x inflates it
+## back into a ball. Measured on toxic_pagoda's 1400 cliff blobs: half_height /
+## radius is median 0.686, p10 0.311, max 0.952 — every single one is squashed,
+## so blending through the sphere path would have rounded the flattest tenth out
+## by 3.2x vertically and destroyed the shelf silhouette the cliff is built from.
+##
+## Degenerate radii collapse the k1 denominator, so guard and fall back to the
+## sphere bound rather than dividing by ~0.
+static func _sdf_ellipsoid(p: Vector3, radii: Vector3) -> float:
+	if radii.x <= 0.0 or radii.y <= 0.0 or radii.z <= 0.0:
+		return p.length() - maxf(radii.x, maxf(radii.y, radii.z))
+	var k0: float = Vector3(p.x / radii.x, p.y / radii.y, p.z / radii.z).length()
+	var k1: float = Vector3(
+		p.x / (radii.x * radii.x),
+		p.y / (radii.y * radii.y),
+		p.z / (radii.z * radii.z)).length()
+	if k1 <= 0.0:
+		return -minf(radii.x, minf(radii.y, radii.z))
+	return k0 * (k0 - 1.0) / k1
+
+
 static func _element_sdf(p: Vector3, elem: SdfElement) -> float:
 	# Translate into the element's own frame BEFORE rotating.
 	#
@@ -113,10 +143,11 @@ static func _element_sdf(p: Vector3, elem: SdfElement) -> float:
 		var s := sin(elem.rotation_y)
 		lp = Vector3(lp.x * c - lp.z * s, lp.y, lp.x * s + lp.z * c)
 	match elem.shape:
-		"sphere":   return _sdf_sphere(lp, Vector3.ZERO, elem.half_size.x)
-		"box":      return _sdf_box(lp, Vector3.ZERO, elem.half_size)
-		"cylinder": return _sdf_cylinder(lp, Vector3.ZERO, elem.half_size.x, elem.half_size.y)
-		_:          return _sdf_sphere(lp, Vector3.ZERO, elem.half_size.length())
+		"sphere":    return _sdf_sphere(lp, Vector3.ZERO, elem.half_size.x)
+		"ellipsoid": return _sdf_ellipsoid(lp, elem.half_size)
+		"box":       return _sdf_box(lp, Vector3.ZERO, elem.half_size)
+		"cylinder":  return _sdf_cylinder(lp, Vector3.ZERO, elem.half_size.x, elem.half_size.y)
+		_:           return _sdf_sphere(lp, Vector3.ZERO, elem.half_size.length())
 
 
 ## Smooth union across all elements — exact union, plus ONE bounded fillet term.
