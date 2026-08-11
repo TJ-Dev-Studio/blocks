@@ -123,10 +123,20 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 			continue  # skip scene visuals — only merge primitives
 		if not block.materials_list.is_empty():
 			continue  # multi-material blocks rendered individually — cannot merge different surface materials
-		if block.interaction == BlockCategories.INTERACT_WALKABLE:
-			continue  # walkable platforms/landings render INDIVIDUALLY — never merge or
-			# face-cull a surface the player stands on (they were vanishing into the
-			# merged mesh while their collision survived → walkable-but-invisible)
+		# WALKABLE blocks used to be excluded here outright. The recorded symptom
+		# was "vanishing into the merged mesh while their collision survived →
+		# walkable-but-invisible", and the ban covered TWO mechanisms at once:
+		# merging AND face-culling. Only one of them can delete a visible surface.
+		#
+		# Merging concatenates triangles; it cannot remove the face a player is
+		# looking at. _find_culled_faces CAN — it drops triangles whose direction
+		# is blocked by a touching neighbour, and a landing slab sandwiched between
+		# other boxes is exactly the shape that loses its top face that way.
+		#
+		# So walkable blocks now MERGE (they are marked below and excluded from
+		# face-culling instead). Measured cost of the wider ban: 12,228 drawable
+		# walkable blocks forming only 1,074 (assembly x material) groups —
+		# 11,154 avoidable draw calls, 91% of all walkable geometry.
 
 		var mesh_inst := block.node.get_node_or_null("Mesh") as MeshInstance3D
 		if mesh_inst == null or mesh_inst.mesh == null:
@@ -153,6 +163,16 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 			"transform": rel_xform,
 			"node": mesh_inst,
 			"shape": block.collision_shape,
+			# Does surface 0 carry UVs? generate_tangents() below is a hard ERROR
+			# without them, and a failed commit yields an invalid merged mesh —
+			# geometry that silently does not render while its collision survives.
+			# That is almost certainly the original "walkable-but-invisible"
+			# defect: walkable geometry includes UV-less meshes, so merging them
+			# broke tangent generation for the whole group.
+			"has_uv": _surface_has_uv(mesh_inst.mesh),
+			# Walkable surfaces merge but must NEVER be a face-cull source or
+			# target — see the note above the WALKABLE branch in the collect loop.
+			"walkable": block.interaction == BlockCategories.INTERACT_WALKABLE,
 		})
 		mesh_count += 1
 
@@ -208,7 +228,20 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		# Do NOT call generate_normals() — source meshes already have correct
 		# per-face normals (flat shading). Regenerating would smooth-average 90°
 		# box corners, creating visible shading gradients on every face.
-		st.generate_tangents()
+		#
+		# generate_tangents() is a HARD ERROR ("UVs are required to generate
+		# tangents") if ANY appended surface lacks UVs, and the resulting commit
+		# is an invalid mesh — geometry that never renders while its collision
+		# survives. Skip it for mixed groups rather than losing the whole group:
+		# tangents only matter for normal-mapped materials, and a group containing
+		# UV-less primitives is not one of those.
+		var all_have_uv := true
+		for e: Dictionary in meshes:
+			if not bool(e.get("has_uv", true)):
+				all_have_uv = false
+				break
+		if all_have_uv:
+			st.generate_tangents()
 		var merged_mesh: ArrayMesh = st.commit()
 
 		var merged_inst := MeshInstance3D.new()
@@ -276,6 +309,14 @@ static func _find_culled_faces(meshes: Array) -> Dictionary:
 
 	for i: int in range(meshes.size()):
 		var entry: Dictionary = meshes[i]
+		# Walkable surfaces are never a cull source OR target. Face-culling is the
+		# only part of merging that can delete a face the player is looking at, and
+		# a landing slab boxed in by neighbours is precisely the shape that loses
+		# its top face — the "walkable-but-invisible" defect. Merging them is safe;
+		# culling them is not, so only the culling half is refused here.
+		if bool(entry.get("walkable", false)):
+			aabb_data[i] = null
+			continue
 		if entry["shape"] != BlockCategories.SHAPE_BOX:
 			aabb_data[i] = null
 			continue
@@ -507,3 +548,20 @@ static func _append_with_culling(
 		st.add_vertex(tv2)
 
 	return culled_count
+
+
+## Does surface 0 of `mesh` carry UVs?
+##
+## SurfaceTool.generate_tangents() raises "UVs are required to generate tangents"
+## and produces an invalid commit if any appended surface lacks them. Checking up
+## front is cheaper than losing a merged group to a failed commit — and a failed
+## commit is invisible geometry with live collision, which is exactly the class of
+## defect that got whole block categories banned from merging.
+static func _surface_has_uv(mesh: Mesh) -> bool:
+	if mesh == null or mesh.get_surface_count() == 0:
+		return false
+	var arrays: Array = mesh.surface_get_arrays(0)
+	if arrays.is_empty() or arrays.size() <= Mesh.ARRAY_TEX_UV:
+		return false
+	var uv = arrays[Mesh.ARRAY_TEX_UV]
+	return uv != null and (uv as PackedVector2Array).size() > 0
