@@ -42,6 +42,10 @@ func _ready() -> void:
 	await _test_edge_cases()
 	await _test_override_material_grouping()
 	await _test_multi_material_merger_exclusion()
+	await _test_seed_stamp()
+	await _test_seed_stamp_face_culled()
+	await _test_seed_stamp_deterministic()
+	await _test_seed_stamp_size_channel()
 
 	print("")
 	print("=" .repeat(60))
@@ -905,3 +909,187 @@ func _test_multi_material_merger_exclusion() -> void:
 		"MMTL-03: multi-material block 'Mesh' node survives merge (not freed)")
 
 	_cleanup(asm_root)
+
+
+# --- GC-93: per-block seed stamp -------------------------------------------
+
+
+## Fetch the vertex COLOR array of the first Merged_* mesh under a root.
+## Returns an empty array if the surface carries no colours at all, which is
+## itself the failure the tests below are watching for: _stamp_seeds() bails out
+## (leaving no ARRAY_COLOR) whenever its vertex accounting disagrees with what
+## SurfaceTool actually committed.
+func _merged_colors(parent: Node3D) -> PackedColorArray:
+	for child in parent.get_children():
+		if child is MeshInstance3D and child.name.begins_with("Merged_"):
+			var mesh: Mesh = (child as MeshInstance3D).mesh
+			if mesh == null or mesh.get_surface_count() == 0:
+				return PackedColorArray()
+			var arrays: Array = mesh.surface_get_arrays(0)
+			if arrays.size() <= Mesh.ARRAY_COLOR or arrays[Mesh.ARRAY_COLOR] == null:
+				return PackedColorArray()
+			return arrays[Mesh.ARRAY_COLOR]
+	return PackedColorArray()
+
+
+## Vertex count of the first Merged_* mesh, for span-accounting checks.
+func _merged_vertex_count(parent: Node3D) -> int:
+	for child in parent.get_children():
+		if child is MeshInstance3D and child.name.begins_with("Merged_"):
+			var mesh: Mesh = (child as MeshInstance3D).mesh
+			if mesh == null or mesh.get_surface_count() == 0:
+				return 0
+			return mesh.surface_get_array_len(0)
+	return 0
+
+
+func _test_seed_stamp() -> void:
+	_section("GC-93 per-block seed stamp")
+
+	# Two same-material boxes, far enough apart that no face culling triggers —
+	# this exercises the append_from() fast path.
+	var blocks: Array = [
+		_make_box("seed_a", Vector3(1, 1, 1), Vector3(0, 0, 0)),
+		_make_box("seed_b", Vector3(1, 1, 1), Vector3(6, 0, 0)),
+	]
+	var asm_root := _build_assembly(blocks)
+	await get_tree().process_frame
+
+	var colors := _merged_colors(asm_root)
+	var vcount := _merged_vertex_count(asm_root)
+
+	# An empty colour array means _stamp_seeds() refused to stamp — its span
+	# accounting did not match the committed surface. That is the single
+	# assumption this whole feature rests on (append_from appends exactly the
+	# source's vertex count), so it gets its own assertion.
+	_assert(colors.size() > 0, "GC93-01: merged mesh carries a vertex COLOR array")
+	_assert(colors.size() == vcount,
+		"GC93-02: colour count %d matches committed vertex count %d" % [colors.size(), vcount])
+
+	# Alpha is the "stamped" marker — unstamped geometry defaults to white.
+	var all_marked := true
+	for c: Color in colors:
+		if c.a > 0.01:
+			all_marked = false
+			break
+	_assert(all_marked, "GC93-03: every stamped vertex carries a == 0.0")
+
+	# The point of the whole change: two blocks in ONE merged mesh must not
+	# share a tint. Before this, the shader hashed NODE_POSITION_WORLD, which is
+	# a single value per merged node.
+	var seeds: Dictionary = {}
+	for c: Color in colors:
+		seeds[snappedf(c.r, 0.001)] = true
+	_assert(seeds.size() >= 2,
+		"GC93-04: two merged blocks carry distinct seeds (got %d)" % seeds.size())
+
+	# Size channel decodes back to the block's real smallest dimension.
+	var decoded := BlockMeshMerger.decode_size(colors[0].b)
+	_assert(absf(decoded - 1.0) < 0.02,
+		"GC93-05: size channel decodes to 1.0m (got %.3f)" % decoded)
+
+	_cleanup(asm_root)
+
+
+func _test_seed_stamp_face_culled() -> void:
+	_section("GC-93 seed stamp survives face culling")
+
+	# Two touching boxes: the shared X faces get culled, so BOTH entries take
+	# the sub-SurfaceTool + index() path instead of append_from(entry.mesh).
+	# index() DEDUPLICATES, so the appended vertex count is the committed length
+	# of the sub-mesh rather than the number of add_vertex calls — the easiest
+	# way to get the span accounting wrong and silently lose the stamp.
+	var blocks: Array = [
+		_make_box("cull_a", Vector3(2, 2, 2), Vector3(0, 0, 0)),
+		_make_box("cull_b", Vector3(2, 2, 2), Vector3(2, 0, 0)),
+	]
+	var asm_root := _build_assembly(blocks)
+	await get_tree().process_frame
+
+	var colors := _merged_colors(asm_root)
+	var vcount := _merged_vertex_count(asm_root)
+	_assert(colors.size() > 0 and colors.size() == vcount,
+		"GC93-06: face-culled merge still stamped (%d colours, %d vertices)" % [colors.size(), vcount])
+
+	var seeds: Dictionary = {}
+	for c: Color in colors:
+		seeds[snappedf(c.r, 0.001)] = true
+	_assert(seeds.size() >= 2,
+		"GC93-07: face-culled blocks keep distinct seeds (got %d)" % seeds.size())
+
+	_cleanup(asm_root)
+
+
+func _test_seed_stamp_deterministic() -> void:
+	_section("GC-93 seed determinism")
+
+	# The seed is baked into the compiled world cache, so the same geometry must
+	# hash the same on every run and every machine. Block ids cannot be used for
+	# this: ensure_id() seeds them with Time.get_ticks_msec().
+	var first: Array = [
+		_make_box("det_a", Vector3(1, 1, 1), Vector3(0, 0, 0)),
+		_make_box("det_b", Vector3(1, 1, 1), Vector3(6, 0, 0)),
+	]
+	var root_a := _build_assembly(first)
+	await get_tree().process_frame
+	var colors_a := _merged_colors(root_a)
+	_cleanup(root_a)
+
+	var second: Array = [
+		_make_box("det_a", Vector3(1, 1, 1), Vector3(0, 0, 0)),
+		_make_box("det_b", Vector3(1, 1, 1), Vector3(6, 0, 0)),
+	]
+	var root_b := _build_assembly(second)
+	await get_tree().process_frame
+	var colors_b := _merged_colors(root_b)
+
+	var same := colors_a.size() == colors_b.size() and colors_a.size() > 0
+	if same:
+		for i: int in range(colors_a.size()):
+			if absf(colors_a[i].r - colors_b[i].r) > 0.001:
+				same = false
+				break
+	_assert(same, "GC93-08: identical geometry produces identical seeds across builds")
+
+	# Distinct blocks must not collide, or neighbours render the same tint and
+	# the edge stays invisible — the defect this feature exists to fix.
+	var distinct := absf(_merged_colors(root_b)[0].r - colors_b[colors_b.size() - 1].r) > 0.001
+	_assert(distinct, "GC93-09: differing positions produce differing seeds")
+
+	_cleanup(root_b)
+
+
+func _test_seed_stamp_size_channel() -> void:
+	_section("GC-93 size channel")
+
+	# Micro-blocks are what the screen-size gate exists to suppress: a 6cm block
+	# must encode a small enough size that the shader fades its tint out before
+	# it can alias. Zero components must NOT be read as the minimum — a sphere
+	# is [radius, height, 0] and a cylinder's x is a radius, so a naive min()
+	# would report 0m and silently kill variation on every sphere in the world.
+	var blocks: Array = [
+		_make_box("micro_a", Vector3(0.06, 0.06, 0.06), Vector3(0, 0, 0)),
+		_make_box("micro_b", Vector3(0.06, 0.06, 0.06), Vector3(6, 0, 0)),
+	]
+	var asm_root := _build_assembly(blocks)
+	await get_tree().process_frame
+	var colors := _merged_colors(asm_root)
+	var decoded := BlockMeshMerger.decode_size(colors[0].b) if colors.size() > 0 else -1.0
+	# Tight tolerance on purpose: this is the exact quantity the anti-static
+	# screen-size gate keys on, and the sqrt encoding exists to make it accurate
+	# here rather than at the 4m end where nothing reads it.
+	_assert(absf(decoded - 0.06) < 0.005,
+		"GC93-10: 6cm block encodes ~0.06m (got %.4f)" % decoded)
+	_cleanup(asm_root)
+
+	var spheres: Array = [
+		_make_sphere("sph_a", 0.5, Vector3(0, 0, 0)),
+		_make_sphere("sph_b", 0.5, Vector3(6, 0, 0)),
+	]
+	var sph_root := _build_assembly(spheres)
+	await get_tree().process_frame
+	var sph_colors := _merged_colors(sph_root)
+	var sph_decoded := BlockMeshMerger.decode_size(sph_colors[0].b) if sph_colors.size() > 0 else -1.0
+	_assert(sph_decoded > 0.01,
+		"GC93-11: sphere [r,h,0] ignores the structural zero (got %.3f)" % sph_decoded)
+	_cleanup(sph_root)
