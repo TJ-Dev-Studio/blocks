@@ -98,7 +98,21 @@ static func _build_light(root: Node3D, block: Block) -> void:
 
 	# Add to group for day cycle discovery
 	var group_name: String = "block_%s" % config.get("group", "steady")
-	light.add_to_group(group_name)
+	# PERSISTENT — the second argument is not optional in practice.
+	#
+	# add_to_group() defaults to persistent = false, and a non-persistent group
+	# is NOT serialized into a PackedScene. Every consumer of these lights finds
+	# them by group (a day/night cycle calling get_nodes_in_group), so on a world
+	# built live from JSON they are found, and on the SAME world loaded from a
+	# compiled .scn they are not — the Light3D nodes are all present and none of
+	# them are in any group.
+	#
+	# Measured on FrogMog's baked hub: 422 Light3D nodes across the artifacts, 0
+	# carrying groups, and the consuming day cycle reporting 0 lights while the
+	# uncached build of the identical content reported 172. The symptom is a
+	# world whose lanterns simply never light, with no error anywhere, and it
+	# survives every rebuild because the geometry is genuinely correct.
+	light.add_to_group(group_name, true)
 
 	# Store base energy as metadata for animation systems
 	light.set_meta("base_energy", light.light_energy)
