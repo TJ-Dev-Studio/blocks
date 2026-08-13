@@ -71,16 +71,27 @@ const SEED_SIZE_REF := 4.0
 # per vertex.
 #
 # COLOR channel layout, all 0..1:
-#   r = per-block seed        — arbitrary but STABLE across runs, so bakes match
-#   g = per-merge-group seed  — the group, not the assembly (see _merge_group)
-#   b = block's smallest dimension / SEED_SIZE_REF, in metres
+#   r = per-block seed   — arbitrary but STABLE across runs, so bakes match
+#   g = reserved, always 0.0
+#   b = sqrt(the block's MIDDLE world-space extent / SEED_SIZE_REF)
 #   a = 0.0 marks "stamped"
 #
 # Alpha is the marker because unstamped geometry defaults to opaque white, so
-# a == 1.0 reliably means "no data here" and the shader falls back to its node
-# hash — which is still correct per-block for anything that never merged.
-# Nothing else reads vertex COLOR: neither block shader references it, and no
-# block material enables vertex_color_use_as_albedo.
+# a == 1.0 reliably means "no data here". Nothing else writes vertex COLOR on
+# block geometry, and no block material enables vertex_color_use_as_albedo.
+#
+# Green is RESERVED rather than used. It carried a per-merge-group seed for
+# structure-level tint until that was measured against the compiler's mesh
+# dedup: the dedup keys on surface_get_arrays(), ARRAY_COLOR is now part of
+# that, and the group seed was derived from the merge root's NODE NAME — which
+# Godot auto-uniquifies for sibling placements (x_root, x_root2). Two placements
+# of one assembly stopped being byte-identical and could no longer collapse,
+# against a pass measured at 13,391 duplicate meshes / 242MB on frog_town alone.
+# Any future use of this channel must be PLACEMENT-INVARIANT for that reason.
+#
+# CONSUMERS: block_world.gdshader reads r/b in its procedural branch. The
+# textured branch and block_world_procedural.gdshader ignore the stamp entirely,
+# so textured materials pay 4 bytes/vertex for data they never read.
 
 
 ## Merge same-material meshes under an assembly root node.
@@ -139,12 +150,6 @@ static func _bucket_by_chunk(blocks: Array, chunk_size: float) -> Dictionary:
 ## Returns 1 if any meshes were merged, 0 otherwise.
 static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, extent: float) -> int:
 	var is_chunk := not chunk_id.is_empty()
-
-	# Seed shared by every block in this merge group. Named for what it actually
-	# keys on: when the caller merges at ZONE level, asm_root is the zone node
-	# and a group is one spatial chunk of it, NOT one assembly. The shader keeps
-	# this off by default for that reason.
-	var grp_seed := _string_seed("%s|%s" % [String(asm_root.name), chunk_id])
 
 	# Identify blocks with neurons (skip merging — they need per-block visual updates)
 	var neuron_ids: Dictionary = {}
@@ -227,7 +232,20 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 			"walkable": block.interaction == BlockCategories.INTERACT_WALKABLE,
 			# GC-93 seed stamp — see the block comment at the top of this file.
 			"seed": _block_seed(block),
-			"min_dim": _block_min_dim(block),
+			# Authored extents are pre-scale: BlockBuilder puts scale_factor on
+			# the block root, and shipped content authors it down to 0.55 — a
+			# 1.8x overstatement against a gate whose whole useful range is 3.1x.
+			#
+			# Scaled by rel_xform, the SAME transform that produces the vertices
+			# just below, and deliberately not by the block's global transform.
+			# That keeps the stamp a pure function of the merged mesh's contents,
+			# which is what the compiler's mesh dedup requires: two placements of
+			# one assembly build identical vertices, so they must get identical
+			# colours or they can never collapse. The cost is that scale applied
+			# ABOVE the merge root is invisible here, so a scaled-up placement is
+			# gated at its unscaled size — bounded, and preferable to defeating a
+			# dedup pass measured at 242MB on frog_town alone.
+			"gate_dim": _block_gate_dim(block) * _min_scale(rel_xform.basis),
 		})
 		mesh_count += 1
 
@@ -288,12 +306,12 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 					# index() above deduplicated, so the committed length — not
 					# the number of add_vertex calls — is what got appended.
 					span_counts.append(sub_mesh.surface_get_array_len(0))
-					span_colors.append(_seed_color(entry, grp_seed))
+					span_colors.append(_seed_color(entry))
 			else:
 				# No faces to cull — use fast path
 				st.append_from(entry["mesh"], 0, entry["transform"])
 				span_counts.append(int(entry["vert_count"]))
-				span_colors.append(_seed_color(entry, grp_seed))
+				span_colors.append(_seed_color(entry))
 
 		# Do NOT call generate_normals() — source meshes already have correct
 		# per-face normals (flat shading). Regenerating would smooth-average 90°
@@ -668,20 +686,50 @@ static func _block_seed(block) -> float:
 	])
 
 
-## The block's smallest real dimension, in metres — what decides whether it is
-## big enough on screen to carry its own tint without aliasing.
+## A block's real world-space extents in metres.
 ##
-## Zero components are skipped, not treated as the minimum: several shapes pack
-## something other than a size into the vector (a sphere is [radius, height, 0],
-## a cylinder's x is a RADIUS), and reading a structural zero as "0m thick"
-## would silently suppress variation on every sphere in the world.
-static func _block_min_dim(block) -> float:
+## The authored vector is NOT extents for round shapes: BlockBuilder feeds
+## dims.x to top_radius/radius and dims.y to height, and a sphere is authored
+## [radius, height, 0]. Reading those as sizes halves every sphere and cylinder,
+## and a structural zero read as "0m thick" would suppress variation on every
+## sphere in the world.
+static func _block_extents(block) -> Vector3:
 	var dims: Vector3 = block.mesh_size if block.mesh_size != Vector3.ZERO else block.collision_size
-	var smallest := INF
+	match block.collision_shape:
+		BlockCategories.SHAPE_SPHERE, BlockCategories.SHAPE_CYLINDER, BlockCategories.SHAPE_CAPSULE:
+			var height: float = dims.y if dims.y > 0.0001 else dims.x * 2.0
+			return Vector3(dims.x * 2.0, height, dims.x * 2.0)
+		_:
+			return dims
+
+
+## The dimension the screen-size gate judges a block by: its MIDDLE extent.
+##
+## Not the smallest. A block's visible face is bounded by its two LARGEST
+## extents, so the short side of the face you are actually looking at is the
+## middle one. Gating on min() judges a 2 x 0.2 x 3m wall panel as a 0.2m
+## sliver even though it presents a 2x3m face, and measured across the hub's
+## procedural blocks that is the difference between a median gate dimension of
+## 0.11m (tint gone at 7.3m — useless) and 0.20m. A needle thin on two axes
+## still has a small middle extent and is still correctly suppressed.
+static func _block_gate_dim(block) -> float:
+	var e := _block_extents(block)
+	var nonzero: Array[float] = []
 	for i: int in range(3):
-		if dims[i] > 0.0001:
-			smallest = minf(smallest, dims[i])
-	return smallest if smallest < INF else 0.5
+		if e[i] > 0.0001:
+			nonzero.append(e[i])
+	if nonzero.is_empty():
+		return 0.5
+	nonzero.sort()
+	# size 3 -> middle, size 2 -> larger, size 1 -> the only one.
+	return nonzero[nonzero.size() / 2]
+
+
+## Smallest scale component of a basis — the conservative reading of how much a
+## transform shrinks the geometry under it.
+static func _min_scale(b: Basis) -> float:
+	var s := b.get_scale()
+	return maxf(minf(s.x, minf(s.y, s.z)), 0.0001)
 
 
 ## Pack one entry's seed data into the vertex colour documented at the top.
@@ -691,9 +739,18 @@ static func _block_min_dim(block) -> float:
 ## 256 steps on sizes the gate does not care about while quantising a 6cm block
 ## to 4.7cm — a 22% error on precisely the small end the gate exists to judge.
 ## The square curve puts the resolution where the decision is made.
-static func _seed_color(entry: Dictionary, grp_seed: float) -> Color:
-	var size_norm := clampf(float(entry.get("min_dim", 0.5)) / SEED_SIZE_REF, 0.0, 1.0)
-	return Color(float(entry.get("seed", 0.5)), grp_seed, sqrt(size_norm), 0.0)
+##
+## EVERY CHANNEL MUST BE PLACEMENT-INVARIANT. The compiler's mesh dedup keys its
+## buckets on surface_get_arrays(), which now includes ARRAY_COLOR, so any
+## channel that differs between two placements of the same assembly becomes the
+## sole reason their meshes cannot collapse. An earlier revision keyed the green
+## channel on the merge root's NODE NAME — and sibling placements get
+## auto-uniquified names (x_root, x_root2), which would have defeated the dedup
+## pass measured at 13,391 duplicate meshes / 242MB on frog_town alone. The seed
+## is hashed from assembly-LOCAL position and size for the same reason.
+static func _seed_color(entry: Dictionary) -> Color:
+	var size_norm := clampf(float(entry.get("gate_dim", 0.5)) / SEED_SIZE_REF, 0.0, 1.0)
+	return Color(float(entry.get("seed", 0.5)), 0.0, sqrt(size_norm), 0.0)
 
 
 ## Decode the size channel back to metres. The shader does this inline; keep the
@@ -737,6 +794,14 @@ static func _stamp_seeds(
 	arrays[Mesh.ARRAY_COLOR] = colors
 	var stamped := ArrayMesh.new()
 	stamped.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	# Never hand back a surfaceless mesh. If add_surface_from_arrays ever fails,
+	# returning `stamped` would put an EMPTY mesh on the merged instance while
+	# every collision body survives — this repo's documented invisible-but-solid
+	# failure, and the reason whole block categories were once banned from
+	# merging. Falling back to the unstamped original costs only the variation.
+	if stamped.get_surface_count() == 0:
+		push_warning("[BlockMeshMerger] GC-93 seed stamp produced no surface; keeping unstamped mesh")
+		return mesh
 	var mat := mesh.surface_get_material(0)
 	if mat != null:
 		stamped.surface_set_material(0, mat)

@@ -1082,6 +1082,40 @@ func _test_seed_stamp_size_channel() -> void:
 		"GC93-10: 6cm block encodes ~0.06m (got %.4f)" % decoded)
 	_cleanup(asm_root)
 
+	# A wall panel presents a 2x3m FACE. Gating it on its smallest dimension
+	# would judge it a 0.2m sliver and fade its tint out at arm's length; the
+	# middle extent (2.0m) is the short side of the face actually being looked
+	# at. Measured across the hub's procedural blocks this is the difference
+	# between a median gate dimension of 0.11m and 0.20m — i.e. between a fix
+	# that dies at 7m and one that survives across a room.
+	var slabs: Array = [
+		_make_box("slab_a", Vector3(2.0, 0.2, 3.0), Vector3(0, 0, 0)),
+		_make_box("slab_b", Vector3(2.0, 0.2, 3.0), Vector3(8, 0, 0)),
+	]
+	var slab_root := _build_assembly(slabs)
+	await get_tree().process_frame
+	var slab_colors := _merged_colors(slab_root)
+	var slab_decoded := BlockMeshMerger.decode_size(slab_colors[0].b) if slab_colors.size() > 0 else -1.0
+	_assert(absf(slab_decoded - 2.0) < 0.05,
+		"GC93-12: 2x0.2x3 panel gates on its 2.0m middle extent (got %.3f)" % slab_decoded)
+	_cleanup(slab_root)
+
+	# scale_factor is applied to the block ROOT at build time and inherited by
+	# the merged vertices, so a gate reading only authored extents judges a
+	# shrunk block at full size. Shipped content authors scale_factor down to
+	# 0.55.
+	var scaled_a := _make_box("scaled_a", Vector3(1, 1, 1), Vector3(0, 0, 0))
+	scaled_a.scale_factor = 0.5
+	var scaled_b := _make_box("scaled_b", Vector3(1, 1, 1), Vector3(6, 0, 0))
+	scaled_b.scale_factor = 0.5
+	var scaled_root := _build_assembly([scaled_a, scaled_b])
+	await get_tree().process_frame
+	var scaled_colors := _merged_colors(scaled_root)
+	var scaled_decoded := BlockMeshMerger.decode_size(scaled_colors[0].b) if scaled_colors.size() > 0 else -1.0
+	_assert(absf(scaled_decoded - 0.5) < 0.02,
+		"GC93-13: scale_factor 0.5 halves the gate dimension (got %.3f)" % scaled_decoded)
+	_cleanup(scaled_root)
+
 	var spheres: Array = [
 		_make_sphere("sph_a", 0.5, Vector3(0, 0, 0)),
 		_make_sphere("sph_b", 0.5, Vector3(6, 0, 0)),
@@ -1090,6 +1124,11 @@ func _test_seed_stamp_size_channel() -> void:
 	await get_tree().process_frame
 	var sph_colors := _merged_colors(sph_root)
 	var sph_decoded := BlockMeshMerger.decode_size(sph_colors[0].b) if sph_colors.size() > 0 else -1.0
-	_assert(sph_decoded > 0.01,
-		"GC93-11: sphere [r,h,0] ignores the structural zero (got %.3f)" % sph_decoded)
+	# A radius-0.5 sphere is a 1.0m BALL. BlockBuilder feeds dims.x to
+	# SphereMesh.radius, so reading the authored vector as extents would encode
+	# 0.5m and fade the tint at half the right distance. Assert the DIAMETER —
+	# an earlier version of this test asserted only "> 0.01" and passed happily
+	# on the wrong value, which is worse than having no test at all.
+	_assert(absf(sph_decoded - 1.0) < 0.02,
+		"GC93-11: sphere radius 0.5 encodes its 1.0m diameter (got %.4f)" % sph_decoded)
 	_cleanup(sph_root)

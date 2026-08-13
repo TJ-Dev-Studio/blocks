@@ -27,7 +27,7 @@ addons/blocks/  (or repo root)
 │   ├── block_builder.gd        Mesh + collision shape factory
 │   ├── block_materials.gd      Material cache + register_materials() seam (headless; game supplies palette/textures/shaders)
 │   ├── block_visuals.gd        Runtime emission/color + color chain animation
-│   ├── block_mesh_merger.gd    Same-material mesh merging (draw call reduction)
+│   ├── block_mesh_merger.gd    Same-material mesh merging (draw call reduction) — see output contract below
 │   ├── block_mesh_modifiers.gd Vertex displacement (noise, organic shaping)
 │   ├── block_sdf_blender.gd    SDF smooth-union blending between blocks
 │   └── block_shape_gen.gd      Pre-generated organic meshes (dome, ramp)
@@ -73,6 +73,25 @@ lod/          ← depends on registry/ (BlockRegistry)
 - **`preload()`** only for scripts that DON'T have `class_name` dependencies on each other.
 - **`class_name`** (global) for all cross-domain references in method bodies. These resolve at call time when the cache is populated.
 - **`load()`** (runtime) for scripts that extend each other within the same domain. See `block_placement_rule.gd` loading `endpoint_snap_rule.gd`.
+
+## Merger Output Contract — merged meshes carry vertex colours
+
+`BlockMeshMerger` writes an `ARRAY_COLOR` onto every merged surface. **A consumer of this library must not use vertex colours on block geometry for anything else, and must not enable `vertex_color_use_as_albedo` on a block material** — it would read this data as paint.
+
+| channel | meaning |
+|---------|---------|
+| `r` | per-block seed, 0..1. Stable across runs and machines, so bakes match |
+| `g` | reserved, always 0.0 |
+| `b` | `sqrt(block's middle world extent / 4.0)` — decode by squaring, `BlockMeshMerger.decode_size()` |
+| `a` | `0.0` marks "stamped". Unstamped geometry defaults to opaque white, so `a == 1.0` means "no data" |
+
+Why it exists: merging collapses N block nodes into ONE `MeshInstance3D`, so any shader keyed on node position resolves a whole merged group to a single value. A per-block quantity has to travel with the geometry. Per-instance shader parameters cannot substitute — they share one fixed global buffer (GL Compatibility caps at 4096 instances).
+
+Two rules for anyone extending this:
+- **Every channel must be placement-invariant.** The consuming game may dedup meshes by comparing `surface_get_arrays()`, which includes `ARRAY_COLOR`. A channel derived from anything placement-specific (node names are auto-uniquified for siblings) silently prevents identical meshes from collapsing.
+- **Derive from the same transform that produces the vertices** (`rel_xform`), so the stamp stays a pure function of the mesh contents.
+
+Cost is 4 bytes per vertex on merged surfaces, paid whether or not the game's shader reads it.
 
 ## How To Add New Components
 
@@ -138,6 +157,7 @@ See README.md for a full example.
 | LOD not updating | `lod/block_lod_controller.gd` — check camera_pos input |
 | Zone not loading | `io/block_zone_loader.gd` + `io/block_file.gd` |
 | Mesh merging skipped | `building/block_mesh_merger.gd` — check extent/block count |
+| Merged blocks all render one flat colour | Expected without the vertex-colour stamp below — a merged group is ONE node, so any shader keyed on node position gives it ONE value |
 | Neuron not reacting | `neurons/block_neuron.gd` — check state bindings |
 | Textures "blink" / "settle" after camera stops on Nvidia (not Mac) | MSAA. Set `msaa_3d: 0` in `render_quality.gd` for the affected tier. Apple's GPU hides this; Nvidia exposes it. See `docs/gotchas.md` → "MSAA Nvidia per-fragment aliasing" for full diagnostic history — don't rebuild the false-lead chain. |
 
