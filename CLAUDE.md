@@ -50,7 +50,7 @@ addons/blocks/  (or repo root)
 ├── lod/                        Distance-based detail levels
 │   └── block_lod_controller.gd Cellular LOD 0-3 (runs every 0.5s)
 │
-└── tests/                      Automated test suites (551 tests)
+└── tests/                      Automated test suites (6 runners — see Test Commands)
 ```
 
 ## Dependency Rules
@@ -143,15 +143,36 @@ See README.md for a full example.
 
 ## Test Commands
 
+There are **six** runners. Each loads a `.tscn` of the same name as its suite
+script; a runner whose scene is missing prints `ERROR: Could not load ...` and
+exits **without running a single assertion**, so treat a suite that produces no
+`PASS` lines as dead, not clean. Every runner ends in `quit(1)` on any failure —
+the exit code is the gate, not the summary line.
+
 ```bash
-# Car assembly suite (157 tests — hierarchy, validation, builder, collision export)
-godot --headless --script res://addons/blocks/tests/run_tests.gd
+# Run from the host game project (paths are res:// relative to it)
+G="/Applications/Godot.app/Contents/MacOS/Godot --headless --path godot_project"
 
-# Power grid suite (394 tests — connections, BFS, cascade failures, visual states)
-godot --headless --script res://addons/blocks/tests/run_power_grid_tests.gd
+# Car assembly — hierarchy, validation, builder, collision export, path finding
+$G --script res://addons/blocks/tests/run_tests.gd
 
-# Cellular suite (subdivision, merge, LOD, DNA, amoeba movement)
-godot --headless --script res://addons/blocks/tests/run_cellular_tests.gd
+# Power grid — connections, BFS, cascade failures, visual states
+$G --script res://addons/blocks/tests/run_power_grid_tests.gd
+
+# Cellular — subdivision, merge, LOD, DNA, amoeba movement
+$G --script res://addons/blocks/tests/run_cellular_tests.gd
+
+# Mesh merger — merge floor, chunking, face culling, material grouping
+$G --script res://addons/blocks/tests/run_mesh_merger_tests.gd
+
+# SDF blender — SDF primitives, smooth union, marching-cubes mesh validity
+$G --script res://addons/blocks/tests/run_sdf_blender_tests.gd
+
+# Pattern expansion — ring, grid, line, scatter, along_path, variation
+$G --script res://addons/blocks/tests/run_pattern_tests.gd
 ```
+
+Per-suite test counts are deliberately not recorded here — they drift, and a
+stale count is how the merger suite sat four assertions behind the code.
 
 **Always run tests after modifying any file in this directory.**
