@@ -41,6 +41,7 @@ func _ready() -> void:
 	await _test_mixed_assembly()
 	await _test_edge_cases()
 	await _test_override_material_grouping()
+	await _test_tint_only_collapses_to_base_material()
 	await _test_multi_material_merger_exclusion()
 	await _test_seed_stamp()
 	await _test_seed_stamp_face_culled()
@@ -1132,3 +1133,43 @@ func _test_seed_stamp_size_channel() -> void:
 	_assert(absf(sph_decoded - 1.0) < 0.02,
 		"GC93-11: sphere radius 0.5 encodes its 1.0m diameter (got %.4f)" % sph_decoded)
 	_cleanup(sph_root)
+
+
+## GC-91: tint-only overrides merge under the BASE material with the tint in
+## ARRAY_CUSTOM0 — the 65%-of-outputs collapse. Blocks with OTHER overrides
+## still fork (covered by _test_override_material_grouping).
+func _test_tint_only_collapses_to_base_material() -> void:
+	_section("Tint-only collapse (GC-91)")
+	var blocks: Array = []
+	var tints := [Color(0.9, 0.5, 0.5), Color(0.5, 0.9, 0.5), Color(0.5, 0.5, 0.9), Color(0.7, 0.7, 0.2)]
+	for i in 8:
+		var b := _make_box("tint_%d" % i, Vector3(2, 2, 2), Vector3(i * 3.0, 1, 0), "wood")
+		b.color_tint = tints[i % 4]        # 4 distinct tints, ONE base material
+		blocks.append(b)
+	var root := _build_assembly(blocks)
+	await get_tree().process_frame
+
+	var merged: Array = []
+	for c in root.get_children():
+		if c is MeshInstance3D and c.name.begins_with("Merged"):
+			merged.append(c)
+	_assert(merged.size() == 1, "8 tint-only blocks (4 tints, 1 base) → 1 merged mesh (got %d)" % merged.size())
+	if merged.size() == 1:
+		var mi: MeshInstance3D = merged[0]
+		var mat = mi.material_override
+		_assert(mat != null and str(mat.resource_name) == "wood", "merged material is the BASE 'wood' (got '%s')" % (str(mat.resource_name) if mat else "null"))
+		var arrays: Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)
+		var custom0 = arrays[Mesh.ARRAY_CUSTOM0]
+		_assert(custom0 != null and not (custom0 is PackedByteArray and custom0.is_empty()), "ARRAY_CUSTOM0 is present on the merged surface")
+		# Decode a sample: CUSTOM0 comes back as PackedByteArray (RGBA8) or PackedColorArray.
+		var a_ok := false
+		if custom0 is PackedColorArray and (custom0 as PackedColorArray).size() > 0:
+			a_ok = (custom0 as PackedColorArray)[0].a > 0.5
+		elif custom0 is PackedByteArray and (custom0 as PackedByteArray).size() >= 4:
+			a_ok = (custom0 as PackedByteArray)[3] > 127
+		_assert(a_ok, "CUSTOM0.a marks the vertices as tint-stamped")
+		# Every vertex has a stamp: length matches the vertex array.
+		var nverts: int = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
+		var ncustom: int = (custom0 as PackedColorArray).size() if custom0 is PackedColorArray else ((custom0 as PackedByteArray).size() / 4 if custom0 is PackedByteArray else 0)
+		_assert(ncustom == nverts, "CUSTOM0 covers every vertex (%d of %d)" % [ncustom, nverts])
+	root.queue_free()

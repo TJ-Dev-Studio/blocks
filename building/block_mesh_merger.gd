@@ -194,6 +194,21 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		if mat == null:
 			continue
 
+		# GC-91 TINT COLLAPSE — see CLAUDE.md § "Tint rides in ARRAY_CUSTOM0".
+		# A block whose ONLY material override is color_tint was minted a
+		# distinct ShaderMaterial per (id, tint), so every tint became its own
+		# merge group and its own draw call: 65% of the hub's mesh outputs.
+		# Group such blocks under the BASE material and carry the tint in a
+		# vertex attribute instead. Blocks with any OTHER override (roughness,
+		# metallic, noise…) keep their forked material — those genuinely differ.
+		var stamp_tint := Color(0, 0, 0, 0)          # a=0 -> "no tint stamp"
+		if block.color_tint != Color.WHITE and block.material_params.is_empty() \
+				and block.shader_path.is_empty() and block.material_type_id.is_empty():
+			var base_mat = BlockMaterials.get_material(block.material_id)
+			if base_mat is ShaderMaterial:
+				mat = base_mat
+				stamp_tint = Color(block.color_tint.r, block.color_tint.g, block.color_tint.b, 1.0)
+
 		var shadow_mode: int = mesh_inst.cast_shadow
 		var key := "%d_%d" % [mat.get_instance_id(), shadow_mode]
 
@@ -232,6 +247,8 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 			"walkable": block.interaction == BlockCategories.INTERACT_WALKABLE,
 			# GC-93 seed stamp — see the block comment at the top of this file.
 			"seed": _block_seed(block),
+			# GC-91 tint stamp — a=1 means "tinted", written to ARRAY_CUSTOM0.
+			"tint": stamp_tint,
 			# Authored extents are pre-scale: BlockBuilder puts scale_factor on
 			# the block root, and shipped content authors it down to 0.55 — a
 			# 1.8x overstatement against a gate whose whole useful range is 3.1x.
@@ -276,6 +293,7 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		# over ~96 vertices per box across the whole world.
 		var span_counts := PackedInt32Array()
 		var span_colors := PackedColorArray()
+		var span_tints := PackedColorArray()   # GC-91: per-span tint for ARRAY_CUSTOM0
 
 		for i: int in range(meshes.size()):
 			var entry: Dictionary = meshes[i]
@@ -307,11 +325,13 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 					# the number of add_vertex calls — is what got appended.
 					span_counts.append(sub_mesh.surface_get_array_len(0))
 					span_colors.append(_seed_color(entry))
+					span_tints.append(entry["tint"])
 			else:
 				# No faces to cull — use fast path
 				st.append_from(entry["mesh"], 0, entry["transform"])
 				span_counts.append(int(entry["vert_count"]))
 				span_colors.append(_seed_color(entry))
+				span_tints.append(entry["tint"])
 
 		# Do NOT call generate_normals() — source meshes already have correct
 		# per-face normals (flat shading). Regenerating would smooth-average 90°
@@ -331,7 +351,7 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 		if all_have_uv:
 			st.generate_tangents()
 		var merged_mesh: ArrayMesh = st.commit()
-		merged_mesh = _stamp_seeds(merged_mesh, span_counts, span_colors)
+		merged_mesh = _stamp_seeds(merged_mesh, span_counts, span_colors, span_tints)
 
 		var merged_inst := MeshInstance3D.new()
 		var name_suffix := ("_c" + chunk_id) if is_chunk else ""
@@ -768,7 +788,8 @@ static func decode_size(channel: float) -> float:
 ## look like a rendering bug rather than a merge bug. Losing the variation is
 ## visible only as flatness; corrupting it is visible as wrong colour.
 static func _stamp_seeds(
-	mesh: ArrayMesh, span_counts: PackedInt32Array, span_colors: PackedColorArray
+	mesh: ArrayMesh, span_counts: PackedInt32Array, span_colors: PackedColorArray,
+	span_tints: PackedColorArray = PackedColorArray()
 ) -> ArrayMesh:
 	if mesh == null or mesh.get_surface_count() == 0 or span_counts.is_empty():
 		return mesh
@@ -792,8 +813,41 @@ static func _stamp_seeds(
 
 	var arrays: Array = mesh.surface_get_arrays(0)
 	arrays[Mesh.ARRAY_COLOR] = colors
+	# GC-91 tint stamp → ARRAY_CUSTOM0 as RGBA8 (4 bytes/vertex). Only written
+	# when at least one span is tinted; an all-untinted surface pays nothing and
+	# the shader's CUSTOM0.a reads 0 (= "use the tint_color uniform").
+	var fmt_flags: int = 0
+	if span_tints.size() == span_counts.size():
+		var any_tint := false
+		for t: Color in span_tints:
+			if t.a > 0.5:
+				any_tint = true
+				break
+		if any_tint:
+			# ARRAY_CUSTOM0 as RGBA8_UNORM must be a PackedByteArray of 4 bytes
+			# per vertex — a PackedColorArray makes add_surface_from_arrays fail
+			# SILENTLY (0 surfaces), which the surfaceless-mesh guard below
+			# would then quietly turn into "no tint stamp". Measured; pack bytes.
+			var bytes := PackedByteArray()
+			for i: int in range(span_counts.size()):
+				var t: Color = span_tints[i]
+				var r8: int = clampi(int(round(t.r * 255.0)), 0, 255)
+				var g8: int = clampi(int(round(t.g * 255.0)), 0, 255)
+				var b8: int = clampi(int(round(t.b * 255.0)), 0, 255)
+				var a8: int = 255 if t.a > 0.5 else 0
+				var span := PackedByteArray()
+				span.resize(span_counts[i] * 4)
+				for v: int in range(span_counts[i]):
+					var o := v * 4
+					span[o] = r8
+					span[o + 1] = g8
+					span[o + 2] = b8
+					span[o + 3] = a8
+				bytes.append_array(span)
+			arrays[Mesh.ARRAY_CUSTOM0] = bytes
+			fmt_flags = Mesh.ARRAY_CUSTOM_RGBA8_UNORM << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
 	var stamped := ArrayMesh.new()
-	stamped.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	stamped.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, fmt_flags)
 	# Never hand back a surfaceless mesh. If add_surface_from_arrays ever fails,
 	# returning `stamped` would put an EMPTY mesh on the merged instance while
 	# every collision body survives — this repo's documented invisible-but-solid

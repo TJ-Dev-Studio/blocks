@@ -93,6 +93,26 @@ Two rules for anyone extending this:
 
 Cost is 4 bytes per vertex on merged surfaces, paid whether or not the game's shader reads it.
 
+### Tint rides in `ARRAY_CUSTOM0`, not in the material (GC-91)
+
+**Per-block `color_tint` used to fork the material.** `get_material_with_overrides(id, {tint_color})` minted a distinct `ShaderMaterial` per (id, tint) — `bark_dark|tint_color=bababa`, `bark_dark|tint_color=cdcfd1`, … — and the merger groups by material instance, so every tint was its own merge group and its own draw call. Censused on the FrogMog hub bake (2026-08-16): 9,348 mesh outputs, **1,462 distinct material keys, 6,067 of the outputs (65%) tint forks**. Collapsing tint into the base material leaves **146 keys**.
+
+So a merged surface carries the tint as a second vertex attribute:
+
+| attribute | channel | meaning |
+|-----------|---------|---------|
+| `ARRAY_CUSTOM0` (RGBA8 unorm) | `rgb` | the block's `color_tint`, linear 0..1 |
+| | `a` | `1.0` marks "tint stamped". Unstamped geometry reads `a == 0.0` (custom attributes default to zero) |
+
+`block_world.gdshader` multiplies albedo by `CUSTOM0.rgb` when `CUSTOM0.a > 0.5`, else by the `tint_color` uniform — so unmerged geometry (studio, live placement, neurons, scene visuals) keeps the uniform path unchanged, and a material that carries other overrides too (roughness, metallic, noise) still forks and still works. `EMISSION` uses the same resolved tint.
+
+Rules:
+- **Tint-only overrides merge under the BASE material.** The merger asks `BlockMaterials.tint_only_base(mat)`: if the mesh's material was minted from `base + {tint_color}` and nothing else, the group key is the base material and the tint goes into CUSTOM0. Anything else keeps its own group.
+- **Placement-invariant, like every stamped channel.** Tint is block CONTENT (from JSON), never derived from a node name or position, so two placements of one assembly stay byte-identical and the compiler's mesh dedup still collapses them.
+- **The albedo pre-multiply is gone for merged geometry.** The forked material also pre-multiplied `albedo_color` by the tint "so the base color is correct even without the tint uniform"; a merged surface uses the base material's `albedo_color` and applies the tint once, in the shader. Same result, one place.
+
+Cost: 4 more bytes per vertex on merged surfaces. Every cache level mixes `STYLE_VERSION` and merged meshes key on `WORLD_CACHE_VERSION`; both bump.
+
 ## Collision Merger Contract — one body per group, shapes without nodes (GC-91)
 
 `BlockCollisionMerger` is the physics twin of `BlockMeshMerger`, and it exists because the mesh merger only ever did half the job. Merging collapses N blocks into one `MeshInstance3D`, but every block still carried its own `StaticBody3D` + `CollisionShape3D` (+ the `Node3D` root that owns them). Measured on the FrogMog hub, 2026-08-16: 141,475 scene nodes for 8,888 meshes — 34,556 bodies + 34,556 shapes + 61,892 containers — and a **68 ms frame floor that survived hiding the entire world**, because Godot's main thread pays per NODE (transform propagation, physics-server sync) whether or not anything is drawn. Draw calls were never the cost.
