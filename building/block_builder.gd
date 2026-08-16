@@ -167,11 +167,19 @@ static func _build_primitive_visual(root: Node3D, block: Block) -> void:
 		BlockCategories.SHAPE_BOX:
 			var box_mesh := BoxMesh.new()
 			box_mesh.size = dims
-			# Subdivisions give the outline shader more vertices to work with,
-			# producing smoother outlines at corners instead of razor-sharp edges.
-			box_mesh.subdivide_width = 2
-			box_mesh.subdivide_height = 2
-			box_mesh.subdivide_depth = 2
+			# NO subdivision. subdivide=2 on all three axes made every box 108
+			# triangles instead of 12 (each face a 3x3 grid) — 9x the geometry
+			# on the bulk of the world, for "smoother outlines at corners". The
+			# outline is an inverted-hull next_pass that extrudes along normals;
+			# a box's corner normals are the same 8 vertices whether the faces
+			# are subdivided or not, so the extra verts bought nothing at the
+			# corners and multiplied the triangle count everywhere. Measured on
+			# the FrogMog hub (2026-08-16): 66.7M primitives/frame at the atrium
+			# with subdivide=2, at 35 fps — the shadow pass then draws every one
+			# of them 4 more times.
+			box_mesh.subdivide_width = 0
+			box_mesh.subdivide_height = 0
+			box_mesh.subdivide_depth = 0
 			mi.mesh = box_mesh
 		BlockCategories.SHAPE_CYLINDER:
 			var cyl := CylinderMesh.new()
