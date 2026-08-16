@@ -93,6 +93,28 @@ Two rules for anyone extending this:
 
 Cost is 4 bytes per vertex on merged surfaces, paid whether or not the game's shader reads it.
 
+## Collision Merger Contract — one body per group, shapes without nodes (GC-91)
+
+`BlockCollisionMerger` is the physics twin of `BlockMeshMerger`, and it exists because the mesh merger only ever did half the job. Merging collapses N blocks into one `MeshInstance3D`, but every block still carried its own `StaticBody3D` + `CollisionShape3D` (+ the `Node3D` root that owns them). Measured on the FrogMog hub, 2026-08-16: 141,475 scene nodes for 8,888 meshes — 34,556 bodies + 34,556 shapes + 61,892 containers — and a **68 ms frame floor that survived hiding the entire world**, because Godot's main thread pays per NODE (transform propagation, physics-server sync) whether or not anything is drawn. Draw calls were never the cost.
+
+What it does: for a set of already-built blocks under one root, group every **eligible** block's static body by `(collision_layer, collision_mask)`, create ONE `StaticBody3D` per group, and add each block's shape to it through `PhysicsServer3D.body_add_shape` **with the shape's world transform relative to the merged body** — no `CollisionShape3D` children. Then free the per-block body (and its shape node). Physics behaviour is unchanged: same shapes, same transforms, same layers/masks; a compound static body is how Godot expects level geometry to be built.
+
+Eligible = `StaticBody3D` whose block is not a neuron, not a trigger (`Area3D` never merges), and whose body has no children besides its `CollisionShape3D`s. Anything a system needs to address individually — springs, levers, cannons, triggers, terrain the loader treats specially — is left alone by construction, because those carry a neuron or are areas.
+
+Contract for consumers:
+- **`merged_body.get_meta("merged_collision") == true`** marks a compound body.
+- **`merged_body.get_meta("shape_block_ids")`** is a `PackedStringArray` indexed by shape index. A raycast/shape-cast result's `shape` field indexes it: `block_id = merged_body.get_meta("shape_block_ids")[result.shape]`. `BlockCollisionMerger.block_id_at(body, shape_idx)` wraps this and returns `""` for non-merged bodies.
+- **The per-block `Node3D` root survives** (it still owns the block's mesh, if unmerged, and its `block_id` meta) — only the body/shape pair under it goes. Code that walks `collider.get_parent()` looking for `block_id` meta finds a merged body's parent is the assembly root, not a block: that is correct for walls, and every such caller today only wants springs/triggers, which never merge.
+- **The Design Studio must not merge.** Its picker raycasts bodies and needs one per block; `WorldCacheLoader.keep_collision_for_editor(true)` already governs this and the merger honours the same flag.
+- **Deleting a block at runtime** (studio god-mode delete, `deleted_children`) removes its shape via `BlockCollisionMerger.remove_block(body, block_id)` (`body_remove_shape` + compact the id map). Freeing the block's root no longer frees any collision.
+
+Where it runs: **load time, in `WorldCacheLoader`, in the same pass that decides per-block whether collision is kept** — the loader has just reconstructed each `Block` (id, layer, size, interaction), which is exactly the input the merger needs, and the bake stays byte-identical (the compiler still serialises per-block bodies, so an old loader keeps working). It does not run in `BlocksFactory` live builds (studio/dev placement) — those want per-block bodies.
+
+Rules for anyone extending this:
+- **Grouping key must include everything the physics server distinguishes**: layer, mask, and `PhysicsMaterial` if a block ever gets one. Two blocks with different masks in one body would give one of them the wrong mask.
+- **Shape transforms are relative to the merged body's global transform.** Place the merged body at the group's first shape's global position (or the root's), and compute every `body_add_shape` transform as `merged.global_transform.affine_inverse() * shape.global_transform`. Getting this backwards moves every wall in the group.
+- **Never merge scaled bodies naively** — a scaled parent scales the shape; bake the scale into the shape transform.
+
 ## How To Add New Components
 
 ### New Shape Type

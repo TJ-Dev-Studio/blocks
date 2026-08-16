@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://cm_test_collision_merger"]
+
+[ext_resource type="Script" path="res://addons/blocks/tests/test_collision_merger.gd" id="1"]
+
+[node name="TestCollisionMerger" type="Node3D"]
+script = ExtResource("1")
