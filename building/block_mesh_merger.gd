@@ -45,6 +45,37 @@ const PAIR_HASH_CELL := 4.0
 ## Visibility range for chunked merged meshes. Safe because chunk AABBs are ≤16m.
 const CHUNK_VIS_RANGE := 80.0
 
+## GC-91 tint stamp encoding: ONE float per vertex (ARRAY_CUSTOM_R_FLOAT),
+## 1 + r8*65536 + g8*256 + b8 for a stamped vertex, 0.0 for an unstamped one
+## (the shader then uses the material's tint_color). Every value is an integer
+## below 2^24, so a float holds it exactly. It replaced RGBA8 (a=1 as the
+## marker) on 2026-09-28: Godot 4.6's GLES3 driver binds a 4-byte custom format
+## as ONE component, so phones read an RGBA8 stamp as (r, 0, 0, 1) — red — and
+## a mesh with no CUSTOM0 as (0, 0, 0, 1) — black. block_world.gdshader decodes
+## this; the two must not drift apart. 4 bytes per vertex, as before.
+const TINT_FORMAT := Mesh.ARRAY_CUSTOM_R_FLOAT
+
+
+## The stamp for one tint (rounded to 8 bits per channel exactly as the RGBA8
+## stamp was, so mesh-cache keys and dedup buckets see the same quantisation).
+static func pack_tint(c: Color) -> float:
+	var r8: int = clampi(int(round(c.r * 255.0)), 0, 255)
+	var g8: int = clampi(int(round(c.g * 255.0)), 0, 255)
+	var b8: int = clampi(int(round(c.b * 255.0)), 0, 255)
+	return 1.0 + float(r8) * 65536.0 + float(g8) * 256.0 + float(b8)
+
+
+## Converts RGBA8 stamp bytes (4 per vertex, a > 127 = stamped) — the form the
+## block-skin generators build — to the packed float array a mesh carries.
+static func pack_tint_bytes(b: PackedByteArray) -> PackedFloat32Array:
+	var f := PackedFloat32Array()
+	f.resize(b.size() / 4)
+	for i in f.size():
+		var o := i * 4
+		f[i] = (1.0 + float(b[o]) * 65536.0 + float(b[o + 1]) * 256.0 + float(b[o + 2])) if b[o + 3] > 127 else 0.0
+	return f
+
+
 ## Metres that map to a full 1.0 in the size channel of the seed stamp below.
 ## 8-bit colour gives ~16mm resolution over this range, far finer than the
 ## screen-size gate that consumes it needs.
@@ -247,7 +278,8 @@ static func _merge_group(asm_root: Node3D, blocks: Array, chunk_id: String, exte
 			"walkable": block.interaction == BlockCategories.INTERACT_WALKABLE,
 			# GC-93 seed stamp — see the block comment at the top of this file.
 			"seed": _block_seed(block),
-			# GC-91 tint stamp — a=1 means "tinted", written to ARRAY_CUSTOM0.
+			# GC-91 tint stamp — a=1 means "tinted"; packed into ARRAY_CUSTOM0
+			# as one float (TINT_FORMAT / pack_tint) by _stamp_seeds.
 			"tint": stamp_tint,
 			# Authored extents are pre-scale: BlockBuilder puts scale_factor on
 			# the block root, and shipped content authors it down to 0.55 — a
@@ -813,9 +845,10 @@ static func _stamp_seeds(
 
 	var arrays: Array = mesh.surface_get_arrays(0)
 	arrays[Mesh.ARRAY_COLOR] = colors
-	# GC-91 tint stamp → ARRAY_CUSTOM0 as RGBA8 (4 bytes/vertex). Only written
-	# when at least one span is tinted; an all-untinted surface pays nothing and
-	# the shader's CUSTOM0.a reads 0 (= "use the tint_color uniform").
+	# GC-91 tint stamp → ARRAY_CUSTOM0 as one packed float (TINT_FORMAT, 4
+	# bytes/vertex). Only written when at least one span is tinted; an
+	# all-untinted surface pays nothing and the shader reads 0 (= "use the
+	# tint_color uniform") for its missing attribute on every renderer.
 	var fmt_flags: int = 0
 	if span_tints.size() == span_counts.size():
 		var any_tint := false
@@ -824,28 +857,19 @@ static func _stamp_seeds(
 				any_tint = true
 				break
 		if any_tint:
-			# ARRAY_CUSTOM0 as RGBA8_UNORM must be a PackedByteArray of 4 bytes
-			# per vertex — a PackedColorArray makes add_surface_from_arrays fail
-			# SILENTLY (0 surfaces), which the surfaceless-mesh guard below
-			# would then quietly turn into "no tint stamp". Measured; pack bytes.
-			var bytes := PackedByteArray()
+			# ARRAY_CUSTOM0 as R_FLOAT must be a PackedFloat32Array of ONE float
+			# per vertex — any other packed type makes add_surface_from_arrays
+			# fail SILENTLY (0 surfaces), which the surfaceless-mesh guard below
+			# would then quietly turn into "no tint stamp".
+			var packed := PackedFloat32Array()
 			for i: int in range(span_counts.size()):
 				var t: Color = span_tints[i]
-				var r8: int = clampi(int(round(t.r * 255.0)), 0, 255)
-				var g8: int = clampi(int(round(t.g * 255.0)), 0, 255)
-				var b8: int = clampi(int(round(t.b * 255.0)), 0, 255)
-				var a8: int = 255 if t.a > 0.5 else 0
-				var span := PackedByteArray()
-				span.resize(span_counts[i] * 4)
-				for v: int in range(span_counts[i]):
-					var o := v * 4
-					span[o] = r8
-					span[o + 1] = g8
-					span[o + 2] = b8
-					span[o + 3] = a8
-				bytes.append_array(span)
-			arrays[Mesh.ARRAY_CUSTOM0] = bytes
-			fmt_flags = Mesh.ARRAY_CUSTOM_RGBA8_UNORM << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
+				var span := PackedFloat32Array()
+				span.resize(span_counts[i])
+				span.fill(pack_tint(t) if t.a > 0.5 else 0.0)
+				packed.append_array(span)
+			arrays[Mesh.ARRAY_CUSTOM0] = packed
+			fmt_flags = TINT_FORMAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT
 	var stamped := ArrayMesh.new()
 	stamped.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, fmt_flags)
 	# Never hand back a surfaceless mesh. If add_surface_from_arrays ever fails,
