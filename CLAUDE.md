@@ -35,8 +35,21 @@ becomes its own merge group and its own draw call — that was 65% of the hub's
 mesh outputs before GC-91.
 
 Group those blocks under the **base** material and carry the tint as a vertex
-attribute in `ARRAY_CUSTOM0`, where `a = 1` marks "stamped". The consuming shader
-reads it in `vertex()` and falls back to the `tint_color` uniform when unstamped.
+attribute in `ARRAY_CUSTOM0`. The consuming shader reads it in `vertex()` and falls
+back to the `tint_color` uniform when unstamped.
+
+The encoding is **one float** per vertex, `BlockMeshMerger.TINT_FORMAT`
+(`ARRAY_CUSTOM_R_FLOAT`), written by `pack_tint()`: `1 + r8·65536 + g8·256 + b8`,
+and `0` for unstamped. Never go back to a 4-byte packed format such as RGBA8.
+Godot 4.6's GLES3 driver binds any 4-byte custom format as **one** component
+(`mesh_storage.cpp`: `size = fmtsize / sizeof(float)`). Every phone runs that
+driver (gl_compatibility), and the GC-91 RGBA8 stamp shipped this way:
+- A stamp read as `(r, 0, 0, 1)`, so every tinted surface drew red.
+- A mesh with no CUSTOM0 read GL's default `(0, 0, 0, 1)`. Its `a = 1` passed the
+  old stamped test, so every other block drew black.
+
+Desktops (Forward+) never showed either. The fix landed 2026-09-28; the evidence
+is in the consumer's `docs/gotchas.md`, "Blocks draw red or black on a phone".
 
 A block with any *other* override — roughness, metallic, noise — keeps its forked
 material. Those genuinely differ.

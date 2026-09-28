@@ -1185,16 +1185,14 @@ func _test_tint_only_collapses_to_base_material() -> void:
 		_assert(mat != null and str(mat.resource_name) == "wood", "merged material is the BASE 'wood' (got '%s')" % (str(mat.resource_name) if mat else "null"))
 		var arrays: Array = (mi.mesh as ArrayMesh).surface_get_arrays(0)
 		var custom0 = arrays[Mesh.ARRAY_CUSTOM0]
-		_assert(custom0 != null and not (custom0 is PackedByteArray and custom0.is_empty()), "ARRAY_CUSTOM0 is present on the merged surface")
-		# Decode a sample: CUSTOM0 comes back as PackedByteArray (RGBA8) or PackedColorArray.
-		var a_ok := false
-		if custom0 is PackedColorArray and (custom0 as PackedColorArray).size() > 0:
-			a_ok = (custom0 as PackedColorArray)[0].a > 0.5
-		elif custom0 is PackedByteArray and (custom0 as PackedByteArray).size() >= 4:
-			a_ok = (custom0 as PackedByteArray)[3] > 127
-		_assert(a_ok, "CUSTOM0.a marks the vertices as tint-stamped")
+		_assert(custom0 is PackedFloat32Array and not (custom0 as PackedFloat32Array).is_empty(), "ARRAY_CUSTOM0 is present on the merged surface as packed floats (R_FLOAT)")
+		var fmt: int = (mi.mesh as ArrayMesh).surface_get_format(0)
+		_assert(((fmt >> Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT) & Mesh.ARRAY_FORMAT_CUSTOM_MASK) == BlockMeshMerger.TINT_FORMAT, "CUSTOM0 format is TINT_FORMAT (R_FLOAT: gl_compatibility binds it whole)")
+		# Decode a sample: >= 1.0 = stamped, and the packed value round-trips a tint.
+		var pf := custom0 as PackedFloat32Array
+		_assert(pf.size() > 0 and pf[0] >= 1.0, "CUSTOM0 marks the vertices as tint-stamped (packed >= 1)")
+		_assert(is_equal_approx(BlockMeshMerger.pack_tint(Color(0.5, 0.25, 1.0)), 1.0 + 128.0 * 65536.0 + 64.0 * 256.0 + 255.0), "pack_tint layout")
 		# Every vertex has a stamp: length matches the vertex array.
 		var nverts: int = (arrays[Mesh.ARRAY_VERTEX] as PackedVector3Array).size()
-		var ncustom: int = (custom0 as PackedColorArray).size() if custom0 is PackedColorArray else ((custom0 as PackedByteArray).size() / 4 if custom0 is PackedByteArray else 0)
-		_assert(ncustom == nverts, "CUSTOM0 covers every vertex (%d of %d)" % [ncustom, nverts])
+		_assert(pf.size() == nverts, "CUSTOM0 covers every vertex (%d of %d)" % [pf.size(), nverts])
 	root.queue_free()
