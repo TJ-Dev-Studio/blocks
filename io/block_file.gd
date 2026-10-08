@@ -92,6 +92,9 @@ const LAYER_MAP := {
 	"WATER": CollisionLayers.WATER,
 	"TRIGGER": CollisionLayers.TRIGGER,
 	"ONEWAY": CollisionLayers.ONEWAY,
+	# Pocket rooms (FrogMog GC-178): solid only for a player who walked in through the room's doorway. A literal, not
+	# CollisionLayers.POCKET, so a consumer whose CollisionLayers predates the constant still parses this file.
+	"POCKET": 14,
 }
 
 
