@@ -61,6 +61,7 @@ func _ready() -> void:
 	_test_glb_validation()
 	_test_glb_cache()
 	_test_glb_build_dispatch()
+	_test_glb_cast_shadow()
 	_test_glb_sdf_exclusion()
 	_test_materials_list_field()
 	_test_multi_material_parsing()
@@ -1909,6 +1910,60 @@ func _test_glb_build_dispatch() -> void:
 		"GLB-01: GlbVisual absent for nonexistent path (graceful warning, not crash)")
 
 	glb_parent.queue_free()
+
+
+func _test_glb_cast_shadow() -> void:
+	_section("GLB cast_shadow (visual.cast_shadow on a GLB block)")
+
+	# A stand-in for an imported GLB: one mesh the import left casting, one it turned off (a
+	# `*NoShadow*` mesh), packed and planted in the GLB cache under a path nothing loads.
+	var model := Node3D.new()
+	model.name = "Model"
+	var caster := MeshInstance3D.new()
+	caster.name = "Body"
+	caster.mesh = BoxMesh.new()
+	model.add_child(caster)
+	caster.owner = model
+	var quiet := MeshInstance3D.new()
+	quiet.name = "Body_NoShadow"
+	quiet.mesh = BoxMesh.new()
+	quiet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	model.add_child(quiet)
+	quiet.owner = model
+	var packed := PackedScene.new()
+	_assert(packed.pack(model) == OK, "GLB shadow: the stand-in GLB packs")
+	model.free()
+	var path := "res://__test_glb_cast_shadow.glb"
+	BlockBuilder._glb_cache[path] = packed
+
+	var parent := Node3D.new()
+	add_child(parent)
+	var off := GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	for declared: bool in [false, true]:
+		var block := BlockFile.file_to_block({
+			"format_version": 1,
+			"name": "glb_shadow_%s" % declared,
+			"properties": {
+				"collision": {"shape": "box", "size": [1, 1, 1]},
+				"visual": {"mesh_type": "glb", "mesh": path, "cast_shadow": declared},
+			},
+		})
+		block.ensure_id()
+		var root: Node3D = BlockBuilder.build(block, parent)
+		var body := root.get_node_or_null("GlbVisual/Body") as GeometryInstance3D
+		var nos := root.get_node_or_null("GlbVisual/Body_NoShadow") as GeometryInstance3D
+		_assert(body != null and nos != null, "GLB shadow: the GLB's meshes are built (cast_shadow %s)" % declared)
+		if body == null or nos == null:
+			continue
+		if declared:
+			_assert(body.cast_shadow == GeometryInstance3D.SHADOW_CASTING_SETTING_ON,
+				"GLB shadow: cast_shadow true keeps the imported caster ON")
+			_assert(nos.cast_shadow == off, "GLB shadow: cast_shadow true never forces an imported no-shadow mesh ON")
+		else:
+			_assert(body.cast_shadow == off and nos.cast_shadow == off,
+				"GLB shadow: cast_shadow false turns every mesh of the GLB off")
+	BlockBuilder._glb_cache.erase(path)
+	parent.queue_free()
 
 
 func _test_glb_sdf_exclusion() -> void:
