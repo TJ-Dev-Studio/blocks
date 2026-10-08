@@ -391,8 +391,21 @@ static func _build_glb_visual(root: Node3D, block: Block) -> void:
 		push_warning("[BlockBuilder] Failed to instantiate GLB: %s" % block.scene_path)
 		return
 	instance.name = "GlbVisual"
+	if not block.cast_shadow:
+		_disable_glb_shadows(instance)   # before it enters the tree: no shadow-casting change for the renderer to chase
 	root.add_child(instance)
 	_apply_glb_materials(instance, block)
+
+
+## visual.cast_shadow false: no GeometryInstance3D in the GLB instance casts a shadow, the
+## way a primitive block's mesh does not. true leaves each mesh as the GLB imported it (an
+## import script may already have turned some off), so it never forces a mesh ON.
+static func _disable_glb_shadows(instance: Node) -> void:
+	var geoms: Array = instance.find_children("*", "GeometryInstance3D", true, false)
+	if instance is GeometryInstance3D:
+		geoms.append(instance)
+	for gi: Node in geoms:
+		(gi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 
 
 ## Apply material overrides to all MeshInstance3D nodes in a GLB instance.
